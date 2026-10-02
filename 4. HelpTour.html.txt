@@ -1,0 +1,243 @@
+<style>
+  /* --- TOUR STYLES --- */
+  /* Updated z-index to 2001 so it sits ABOVE the overlay (2000) */
+  .tour-highlight { position: relative; z-index: 2001; pointer-events: auto; }
+  
+  /* Sidebar Links Highlight */
+  .tour-highlight > a {
+    position: relative;
+    background-color: rgba(255, 221, 0, 0.15) !important; /* Wickes Yellow Tint */
+    border-left-color: #ffdd00 !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 221, 0, 0.5);
+  }
+
+  /* Generic Content Highlight (for Tables/Divs) */
+  .tour-highlight:not(li) {
+    box-shadow: 0 0 0 4px #ffdd00, 0 0 0 2000px rgba(0,0,0,0.4); /* Glow + Darken elsewhere */
+    border-radius: 4px;
+    background-color: white; /* Ensure text remains readable */
+  }
+
+  /* Pulsing Effect */
+  .tour-highlight::after {
+    content: ""; position: absolute; inset: 0;
+    border-radius: 0px;
+    pointer-events: none;
+    box-shadow: 0 0 0 0 rgba(255, 221, 0, 0.7);
+    animation: tourPulse 1.5s infinite;
+    z-index: 1002;
+  }
+
+  @keyframes tourPulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 221, 0, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 221, 0, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 221, 0, 0); }
+  }
+
+  /* Overlay & Bubble */
+  #helpTourOverlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 2000; display: none; opacity: 0; transition: opacity 0.2s;
+  }
+  #helpTourOverlay.show { display: block; opacity: 1; }
+
+  #helpTourBubble {
+    position: fixed; z-index: 3000; display: none;
+    top: 100px; left: 270px; /* Sidebar width + gap */
+    width: 300px; background: #fff; color: #333;
+    border-left: 5px solid #009ee3; /* Wickes Blue */
+    border-radius: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    padding: 20px;
+  }
+  #helpTourBubble.show { display: block; animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  #helpTourBubble h3 { margin: 0 0 10px 0; color: #073763; font-size: 1.1em; display: flex; justify-content: space-between; align-items: center; }
+  #helpTourBubble .close-x { cursor: pointer; color: #999; font-size: 1.2em; line-height: 0.8; }
+  #helpTourBubble .close-x:hover { color: #333; }
+  
+  .tour-footer { margin-top: 15px; display: flex; justify-content: flex-end; }
+  .tour-btn { background: #009ee3; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+  .tour-btn:hover { background: #073763; }
+
+</style>
+
+<div id="helpTourOverlay"></div>
+<div id="helpTourBubble">
+  <h3><span id="htTitle">Title</span> <span class="close-x" id="htClose">&times;</span></h3>
+  <div id="htBody" style="font-size: 0.9em; line-height: 1.5;"></div>
+  <div class="tour-footer"><button id="htNext" class="tour-btn">Next</button></div>
+</div>
+
+<script>
+(function() {
+  // 1. Define the possible stops
+  const STOPS = [
+    { 
+      id: 'dashboard', 
+      sel: '#nav-dashboard a', 
+      title: 'My Dashboard', 
+      text: 'Your personal hub. View your remaining allowance, booked holidays, and a calendar overview of your year.' 
+    },
+    {
+      id: 'allowance',
+      sel: '#remainingDaysDisplay', 
+      title: 'Accrued Allowance',
+      text: 'Your allowance accrues over the year (20% by Feb, 40% Apr, 60% Jun, 80% Aug, 100% Oct). Ensure you have accrued enough days for the date of your holiday.'
+    },
+    {
+      id: 'short_breaks',
+      sel: '#shortBreaksCard', // This will automatically skip if the widget is hidden (for non-C3s)
+      title: 'Short Breaks (C3)',
+      text: 'You are limited to 5 isolated "Short Breaks" (1-2 day holidays) per year. Longer holidays (3+ days) do not count towards this limit.'
+    },
+    { 
+      id: 'request', 
+      sel: '#bookNewHolidayBtnSidebar', 
+      title: 'Make a Request', 
+      text: 'Click here to book holiday. <br><br><strong>Note:</strong> You cannot self-book dates less than 7 days in advance. If you need short-notice leave, please ask your Line Manager.' 
+    },
+    {
+      id: 'cancellation',
+      sel: '#myHolidaysTable',
+      title: 'Cancelling Holidays',
+      text: 'You can cancel future bookings here. <br><br><strong>Warning:</strong> If you cancel a day, you may not be able to rebook it yourself (e.g. if it is within 7 days). You will need your Manager to rebook it.'
+    },
+    {
+      id: 'statutory',
+      sel: '#myHolidaysTable', 
+      title: 'Statutory Holidays',
+      text: 'You will see Statutory Holidays (New Year, Christmas, Boxing Day) and Paid Absence (Xmas Eve) booked automatically.'
+    },
+    { 
+      id: 'manager', 
+      sel: '#nav-manager a', 
+      title: 'Team Management', 
+      text: 'Managers Only: View your team\'s requests, book holiday on their behalf, and monitor team allowance.' 
+    },
+    { 
+      id: 'tracker', 
+      sel: '#nav-tracker a', 
+      title: 'Holiday Tracker', 
+      text: 'Supervisors & Managers: Access the master tracker for a detailed grid view of all shifts.' 
+    },
+    { 
+      id: 'admin', 
+      sel: '#nav-admin a', 
+      title: 'Admin Hub', 
+      text: 'Admins Only: Manage user accounts, log sickness/absence, and adjust allowances manually.' 
+    }
+  ];
+
+  let currentSteps = [];
+  let stepIndex = 0;
+
+  const els = {
+    overlay: document.getElementById('helpTourOverlay'),
+    bubble: document.getElementById('helpTourBubble'),
+    title: document.getElementById('htTitle'),
+    body: document.getElementById('htBody'),
+    nextBtn: document.getElementById('htNext'),
+    closeBtn: document.getElementById('htClose')
+  };
+
+  // 2. Global Function to Inject Button (Called by Index.html)
+  window.injectHelpButton = function() {
+    if (document.getElementById('helpTourBtn')) return;
+    const nav = document.querySelector('.nav-links');
+    if (!nav) return;
+
+    const li = document.createElement('li');
+    li.style.marginTop = "auto"; // Push to bottom
+    li.style.borderTop = "1px solid rgba(255,255,255,0.1)";
+    li.innerHTML = `
+      <a href="#" id="helpTourBtn">
+        <i class="fas fa-question-circle"></i> Help Tour
+      </a>`;
+    nav.appendChild(li);
+    document.getElementById('helpTourBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      startTour();
+    });
+  };
+
+  function startTour() {
+    // Build steps dynamically based on what is VISIBLE
+    currentSteps = STOPS.filter(stop => {
+      const el = document.querySelector(stop.sel);
+      if (!el) return false;
+      
+      // 1. Check Sidebar Items
+      const li = el.closest('li');
+      if (li) return getComputedStyle(li).display !== 'none';
+
+      // 2. Check Main Content Items (like the table or cards)
+      // We check offsetParent to see if the element itself (or its parent) is visible
+      return el.offsetParent !== null; 
+    });
+
+    if (currentSteps.length === 0) return alert("No tour steps available.");
+
+    stepIndex = 0;
+    showStep(0);
+  }
+
+  function showStep(idx) {
+    if (idx >= currentSteps.length) { endTour(); return; }
+    
+    const step = currentSteps[idx];
+    const target = document.querySelector(step.sel);
+    if (!target) { showStep(idx + 1); return; } // Skip if missing
+
+    // Highlight
+    document.querySelectorAll('.tour-highlight').forEach(el => el.classList.remove('tour-highlight'));
+    
+    // If it's a sidebar item, highlight the LI. If it's a table/div, highlight the Element.
+    const li = target.closest('li');
+    if (li) li.classList.add('tour-highlight');
+    else target.classList.add('tour-highlight');
+
+    // UI Updates
+    els.overlay.classList.add('show');
+    els.bubble.classList.add('show');
+    els.title.textContent = step.title;
+    els.body.innerHTML = step.text; // Changed to innerHTML to support <br> tags
+    els.nextBtn.textContent = (idx === currentSteps.length - 1) ? "Finish" : "Next";
+
+    // Position Bubble (Align with element)
+    const rect = target.getBoundingClientRect();
+    
+    // If sidebar item, place to the right. 
+    if (li) {
+        els.bubble.style.left = '270px'; // Fixed Sidebar Width
+        els.bubble.style.top = Math.max(20, rect.top) + 'px';
+    } else {
+        // Main content items: Place centered-ish relative to the target
+        els.bubble.style.left = Math.max(20, rect.left + (rect.width/2) - 150) + 'px';
+        els.bubble.style.top = Math.max(20, rect.top - 10) + 'px'; // Just above/on top
+    }
+  }
+
+  function nextStep() {
+    stepIndex++;
+    showStep(stepIndex);
+  }
+
+  function endTour() {
+    els.overlay.classList.remove('show');
+    els.bubble.classList.remove('show');
+    document.querySelectorAll('.tour-highlight').forEach(el => el.classList.remove('tour-highlight'));
+  }
+
+  // Bind Events
+  els.nextBtn.addEventListener('click', nextStep);
+  els.closeBtn.addEventListener('click', endTour);
+  els.overlay.addEventListener('click', endTour);
+
+})();
+</script>

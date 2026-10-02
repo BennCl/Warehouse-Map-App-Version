@@ -1,0 +1,520 @@
+/* =============================================================================
+  UNIFIED EMAIL SERVICE (CSS LOGO VERSION)
+  - Replaces broken images with a CSS-styled Text Logo (100% reliable).
+  - No Emojis.
+  - Handles Manager Lookup automatically.
+  =============================================================================
+*/
+
+const SPREADSHEET_ID_EMAIL = '1wLTDovDcceXdVEK4H0R-2L4OkrAgW8f61pKYYWIPCA4'; 
+
+var EmailService = {
+
+  // --- 1. CORE SENDING FUNCTION ---
+  _send: function(to, subject, htmlBody, ccEmail) {
+    if (!to) return;
+    const options = { htmlBody: htmlBody, name: "Wickes Holiday Portal" };
+    if (ccEmail) options.cc = ccEmail; // Explicitly set CC
+    try {
+      MailApp.sendEmail(to, subject, "", options);
+    } catch (e) { console.error("Email Error: " + e.message); }
+  },
+
+  // --- 2. MANAGER LOOKUP HELPER ---
+  getManagerEmail: function(dept, type) {
+    try {
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID_EMAIL);
+      const sheet = ss.getSheetByName("Recipients");
+      if (!sheet) return "";
+      
+      const data = sheet.getDataRange().getValues();
+      const targetDept = String(dept).trim().toLowerCase();
+      
+      const row = data.find(r => String(r[0]).trim().toLowerCase() === targetDept);
+      if (!row) return "";
+      
+      // Column C (Index 2) = Manager, Column D (Index 3) = Senior
+      return type === 'Senior' ? row[3] : row[2]; 
+    } catch (e) {
+      console.warn("Could not fetch manager email: " + e.message);
+      return "";
+    }
+  },
+
+  // --- 3. PUBLIC METHODS ---
+
+  // A. APPROVED
+  // A. APPROVED
+  sendApprovedEmail: function(data) {
+    const subject = "Holiday Request Approved: " + data.requesterName;
+    const managerEmail = this.getManagerEmail(data.department, 'Manager'); 
+    
+    // --- AUTOMATIC BACKEND LOOKUP ENHANCEMENT ---
+    // If specificDates list is missing, query the Requests DB directly via Request ID
+    if ((!data.specificDates || data.specificDates.length === 0) && data.holidayId) {
+      try {
+        const ss = SpreadsheetApp.openById(SPREADSHEET_ID_EMAIL); 
+        const reqSheet = ss.getSheetByName("Requests");
+        if (reqSheet) {
+          const reqIdStr = String(data.holidayId).trim();
+          const finder = reqSheet.getRange("A:A").createTextFinder(reqIdStr).matchEntireCell(true); 
+          const cell = finder.findNext();
+          
+          if (cell) {
+            const rowNum = cell.getRow(); 
+            const jsonDates = reqSheet.getRange(rowNum, 10).getValue(); 
+            if (jsonDates) {
+              data.specificDates = JSON.parse(jsonDates);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Email Service failed visual date matrix array lookup: " + e.message);
+      }
+    }
+    // ---------------------------------------------
+    
+    const html = this._getTemplate_Decision({
+      ...data,
+      title: "Holiday Request Approved",
+      status: "Approved",
+      bgColor: "#f1f8e9", // Light Green
+      borderColor: "#92bc20", // Wickes Green
+      message: "Your holiday request has been approved."
+    }); 
+
+    this._send(data.requesterEmail, subject, html, managerEmail); 
+  },
+
+  // B. PENDING RECEIPT
+  sendSubmissionConfirmation: function(d) {
+    const managerEmail = this.getManagerEmail(d.department, 'Manager'); 
+    const html = this._getTemplate_Submission(d); 
+    this._send(d.requesterEmail, "Holiday Request Submitted: " + d.requesterName, html, managerEmail); 
+  },
+
+  // C. REJECTED
+  sendRejectedEmail: function(d) {
+    const managerEmail = this.getManagerEmail(d.department, 'Manager'); 
+    const html = this._getTemplate_Rejected(d); 
+    this._send(d.requesterEmail, "Holiday Request Rejected: " + d.requesterName, html, managerEmail); 
+  },
+
+  // D. WAITLIST
+  sendRejectedCapEmail: function(d) {
+    const managerEmail = this.getManagerEmail(d.department, 'Manager'); 
+    const html = this._getTemplate_RejectedCap(d); 
+    this._send(d.requesterEmail, "Holiday Waitlisted (Capacity Full): " + d.requesterName, html, managerEmail); 
+  },
+
+  // E. EXTENDED LEAVE
+  sendExtendedLeaveEmail: function(data) {
+    const managerEmail = this.getManagerEmail(data.department, 'Manager'); 
+    const seniorEmail = this.getManagerEmail(data.department, 'Senior');   
+
+    // 1. Receipt to Requester
+    const htmlReceipt = this._getTemplate_Receipt(data); 
+    this._send(data.requesterEmail, "Holiday Request Received (Extended)", htmlReceipt, managerEmail); 
+
+    // 2. Alert Senior Manager
+    if (seniorEmail) {
+       const htmlAuth = this._getTemplate_ActionRequired(data, true); 
+       this._send(seniorEmail, "Authorisation Required: Extended Leave", htmlAuth, null); 
+    }
+  },
+
+  // F. CANCELLATION
+  sendCancellationEmail: function(d) {
+    const managerEmail = this.getManagerEmail(d.department, 'Manager'); 
+    const html = this._getTemplate_Cancellation(d); 
+    this._send(d.requesterEmail, "Holiday Cancelled: " + d.requesterName, html, managerEmail); 
+  },
+
+  // G. WAITLIST ALERT (To Manager)
+  sendWaitlistAlert: function(dept, candidates, freedDate) {
+    const managerEmail = this.getManagerEmail(dept, 'Manager'); 
+    if (!managerEmail) return; 
+
+    const html = this._getTemplate_WaitlistAlert({
+      dept: dept,
+      candidates: candidates,
+      freedDate: new Date(freedDate).toLocaleDateString('en-GB'),
+      appUrl: 'https://script.google.com/a/macros/wickes.co.uk/s/AKfycbzsqTwZyS6O5UAyMaLq2BLk2vkOBezkZk5IkeyIxayp2JOMriSsX2sWTe6u0JVJPQWE/exec'
+    }); 
+
+    this._send(managerEmail, "ACTION: Space Available in " + dept, html, null); 
+  },
+
+  // H. WELCOME EMAIL (New Users)
+  sendWelcomeEmail: function(data) {
+    // No manager CC needed for a simple welcome email
+    const subject = "Wickes Holiday Portal: Account Created"; 
+    const html = this._getTemplate_Welcome({
+      ...data,
+      appUrl: 'https://script.google.com/a/macros/wickes.co.uk/s/AKfycbzsqTwZyS6O5UAyMaLq2BLk2vkOBezkZk5IkeyIxayp2JOMriSsX2sWTe6u0JVJPQWE/exec'
+    }); 
+    this._send(data.email, subject, html, null); 
+  },
+
+  // --- 4. HTML GENERATORS (STYLED INLINE) ---
+
+  // Common Header/Footer Wrapper
+  _wrapHtml: function(content) {
+    // We use a CSS text-based logo. It mimics the Wickes Brand (White Text on Dark Blue)
+    // but requires NO external images, so it will never appear "broken". 
+    
+    return `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f4; padding: 30px 0; margin: 0; width: 100%;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
+          
+          <div style="background: linear-gradient(135deg, #073763, #0b559b); padding: 25px; text-align: center; border-bottom: 4px solid #009ee3;">
+             <span style="color: #ffffff; font-size: 28px; font-weight: bold; letter-spacing: -0.5px; font-family: sans-serif;">Wickes</span>
+             <span style="color: #009ee3; font-size: 28px; font-weight: 300; font-family: sans-serif; margin-left:5px;">Holiday Portal</span>
+          </div>
+          
+          <div style="padding: 30px; color: #333333; line-height: 1.6; font-size: 16px;">
+            ${content}
+          </div>
+          
+          <div style="background-color: #eeeeee; padding: 20px; text-align: center; font-size: 12px; color: #777777; border-top: 1px solid #e0e0e0;">
+            &copy; ${new Date().getFullYear()} Wickes Holiday Portal.<br>
+            Please do not reply to this automated email.
+          </div>
+
+        </div>
+      </div>
+    `; 
+  },
+  // ============================================================================================================================================================================================
+  // I. HOLIDAY NUDGE
+  // ============================================================================================================================================================================================
+  sendNudgeEmail: function(d) {
+    const subject = "Holiday Reminder: Don't miss out on your time off!";
+    const html = this._getTemplate_Nudge(d);
+    this._send(d.email, subject, html, null);
+  },
+
+  _getTemplate_Nudge: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Time for a break?</h2>
+      <p>Hi ${d.name},</p>
+      <p>We noticed you haven't booked much holiday yet this year. It is really important for your wellbeing to take regular breaks.</p>
+      
+      <div style="background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <p style="margin-top:0; font-weight:bold; color:#0d47a1;">Your Current Balance</p>
+        <div>You have currently booked <strong>${d.booked} days</strong>.</div>
+        <div style="margin-top:5px; font-size:0.9em; color:#555;">We recommend having booked at least <strong>${d.target} days</strong> by the ${d.period} to ensure you don't lose them or struggle to find dates later in the year.</div>
+      </div>
+      
+      <p>Why not log in now and book some time off?</p>
+      
+      <a href="${WEB_APP_URL}" style="display: inline-block; padding: 12px 24px; background: linear-gradient(135deg, #009ee3, #33bdf2); color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; border: 1px solid #009ee3;">Open Holiday Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Decision
+_getTemplate_Decision: function(d) {
+  // Generate a detailed weekly breakdown if specific dates are provided
+  let breakdownHtml = "";
+  
+  if (d.specificDates && d.specificDates.length > 0) {
+    // Group dates by their Week Commencing (Sunday) date
+    const weeksMap = {};
+    
+    d.specificDates.forEach(dateStr => {
+      const dateObj = new Date(dateStr);
+      const dayOfWeek = dateObj.getDay();
+      
+      // Calculate Sunday WC date
+      const wcDate = new Date(dateObj);
+      wcDate.setDate(dateObj.getDate() - dayOfWeek);
+      const wcIso = `${wcDate.getFullYear()}-${("0" + (wcDate.getMonth() + 1)).slice(-2)}-${("0" + wcDate.getDate()).slice(-2)}`;
+      
+      if (!weeksMap[wcIso]) {
+        weeksMap[wcIso] = [];
+      }
+      weeksMap[wcIso].push(dateObj);
+    });
+
+    const sortedWcKeys = Object.keys(weeksMap).sort();
+    
+    // Only build a week-by-week table if the request crosses multiple weeks
+    if (sortedWcKeys.length > 1 || d.specificDates.length > 5) {
+      breakdownHtml = `
+        <div style="margin-top: 15px; border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left;">
+            <thead>
+              <tr style="background-color: #f5f5f5; border-bottom: 1px solid #e0e0e0;">
+                <th style="padding: 10px; font-weight: bold; color: #073763;">Week Commencing</th>
+                <th style="padding: 10px; font-weight: bold; color: #073763;">Days Booked</th>
+                <th style="padding: 10px; font-weight: bold; color: #073763;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+      
+      sortedWcKeys.forEach(wcKey => {
+        const dateParts = wcKey.split('-');
+        const formattedWc = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+        
+        // Sort individual days in that week and map to short format (e.g., "Fri 22/05")
+        const formattedDays = weeksMap[wcKey]
+          .sort((a, b) => a - b)
+          .map(date => {
+            const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
+            return `${dayName} ${("0" + date.getDate()).slice(-2)}/${("0" + (date.getMonth() + 1)).slice(-2)}`;
+          })
+          .join(', ');
+        
+        const weekCount = weeksMap[wcKey].length;
+        
+        breakdownHtml += `
+          <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 10px; font-weight: bold; color: #333;">${formattedWc}</td>
+            <td style="padding: 10px; color: #666; font-size: 13px;">${formattedDays}</td>
+            <td style="padding: 10px; font-weight: bold; color: #333333;">${weekCount} ${weekCount === 1 ? 'Day' : 'Days'}</td>
+          </tr>
+        `;
+      });
+      
+      breakdownHtml += `
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  const body = `
+    <h2 style="color: #073763; margin-top: 0;">${d.title}</h2>
+    <p>Hi ${d.requesterName},</p>
+    <p>${d.message}</p>
+    
+    <div style="background-color: ${d.bgColor}; border-left: 6px solid ${d.borderColor}; padding: 20px; margin: 25px 0; border-radius: 4px;">
+      <div style="margin-bottom: 8px;"><strong>Status:</strong> <span style="font-weight: bold; color: #333;">${d.status}</span></div>
+      <div style="margin-bottom: 8px;"><strong>Overall Range:</strong> ${d.startDate} to ${d.endDate}</div>
+      <div style="margin-bottom: 8px;"><strong>Total Leave Duration:</strong> ${d.totalDays} Days</div>
+      ${breakdownHtml}
+    </div>
+
+    <p style="font-size: 14px; color: #666; margin-bottom: 20px;">You can view your updated balance on the portal.</p>
+    
+    <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Open Holiday Portal</a>
+  `;
+  return this._wrapHtml(body);
+},
+
+  // Template: Receipt
+  _getTemplate_Receipt: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Request Received</h2>
+      <p>Hi ${d.requesterName},</p>
+      <p>Your holiday request has been received and is currently <strong>Pending Approval</strong>.</p>
+      
+      <div style="background-color: #fff8e1; border-left: 6px solid #ffc107; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <div style="margin-bottom: 8px;"><strong>Dates:</strong> ${d.startDate} to ${d.endDate}</div>
+        <div style="margin-bottom: 8px;"><strong>Duration:</strong> ${d.totalDays} Days</div>
+        <div><strong>Comment:</strong> ${d.comment || 'None'}</div>
+      </div>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Status</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Action Required
+  _getTemplate_ActionRequired: function(d, isSenior) {
+    const title = isSenior ? "Authorisation Required" : "ACTION REQUIRED";
+    const subtext = isSenior ? "One of your Colleagues has made a request that exceeds 12 consecutive days and requires your approval" : "New Holiday Request";
+    
+    const body = `
+      <h2 style="color: #dd052a; margin-top: 0; text-transform:">${title}</h2>
+      <p style="font-size: 18px; color: #555;">${subtext}</p>
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+      
+      <p><strong>Colleague:</strong> ${d.requesterName}</p>
+      <p><strong>Department:</strong> ${d.department}</p>
+      
+      <div style="background-color: #f4f4f4; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #ddd;">
+        <div style="margin-bottom: 8px;"><strong>Dates:</strong> ${d.startDate} to ${d.endDate}</div>
+        <div style="margin-bottom: 8px;"><strong>Total Days:</strong> ${d.totalDays}</div>
+        <div><strong>Reason/Comment:</strong> ${d.comment || 'N/A'}</div>
+      </div>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #073763; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Log in to Review</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Cancellation
+  _getTemplate_Cancellation: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Holiday Cancelled</h2>
+      <p>Hi ${d.requesterName},</p>
+      <p>The following booking has been cancelled and your allowance has been refunded.</p>
+      
+      <div style="background-color: #ffebee; border-left: 6px solid #c62828; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <div style="margin-bottom: 8px;"><strong>Dates:</strong> ${d.startDate} to ${d.endDate}</div>
+        <div><strong>Refunded:</strong> ${d.totalDays} Days</div>
+      </div>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Balance</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Waitlist Alert
+  _getTemplate_WaitlistAlert: function(d) {
+    // Generate list of candidates
+    let listHtml = "";
+    d.candidates.forEach(c => {
+        listHtml += `
+        <li style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+            <strong>${c.name}</strong> (${c.payroll})<br>
+            Wanted: ${c.dates} (${c.days} days)<br>
+            <span style="color: #2e7d32; font-size: 12px;">Allowance Available: ${c.remaining} days</span>
+        </li>`;
+    });
+
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Space Available</h2>
+      <p>Dear Management,</p>
+      <p>A holiday starting on <strong>${d.freedDate}</strong> in <strong>${d.dept}</strong> has just been cancelled.</p>
+      
+      <div style="background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <p style="margin-top:0; font-weight:bold; color:#0d47a1;">Waitlist Matches</p>
+        <p style="font-size:14px;">The following colleagues previously requested these dates (rejected due to cap) and currently have enough allowance:</p>
+        <ul style="list-style: none; padding: 0; margin: 0;">
+            ${listHtml}
+        </ul>
+      </div>
+      
+      <p>This is <strong>first come, first served</strong>. Please log in to the portal to book for the chosen colleague.</p>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Open Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  _getTemplate_Submission: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Request Submitted</h2>
+      <p>Hi ${d.requesterName},</p>
+      <p>Your holiday request has been successfully submitted and is awaiting approval.</p>
+      
+      <div style="background-color: #fff8e1; border-left: 6px solid #ffc107; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <div style="margin-bottom: 8px;"><strong>Status:</strong> <span style="font-weight: bold; color: #856404;">Pending Approval</span></div>
+        <div style="margin-bottom: 8px;"><strong>Dates:</strong> ${d.startDate} to ${d.endDate}</div>
+        <div><strong>Total Days:</strong> ${d.totalDays}</div>
+      </div>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Hard Rejection (Manual or Policy)
+  _getTemplate_Rejected: function(d) {
+    // LOGIC FIX: Use the Rejection Reason (System/Manager), NOT the User's Comment
+    const reasonText = d.rejectionReason && d.rejectionReason !== '' 
+        ? d.rejectionReason 
+        : "Operational requirements / Staffing levels.";
+
+    const body = `
+      <h2 style="color: #dd052a; margin-top: 0;">Request Declined</h2>
+      <p>Hi ${d.requesterName},</p>
+      <p>We are unable to approve your holiday request at this time.</p>
+      
+      <div style="background-color: #ffebee; border-left: 6px solid #c62828; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <div style="margin-bottom: 8px;"><strong>Status:</strong> <span style="font-weight: bold; color: #c62828;">Rejected</span></div>
+        <div style="margin-bottom: 8px;"><strong>Dates:</strong> ${d.startDate} to ${d.endDate}</div>
+        <div><strong>Reason:</strong> ${reasonText}</div>
+      </div>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #073763; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Rejected by Cap (Waitlist) - THIS IS THE ONE CAUSING YOUR CURRENT ERROR
+  _getTemplate_RejectedCap: function(d) {
+    const body = `
+      <h2 style="color: #dd052a; margin-top: 0;">Request Waitlisted</h2>
+      <p>Hi ${d.requesterName},</p>
+      <p>Your request cannot be approved immediately because the maximum staff capacity for <strong>${d.department}</strong> has been reached.</p>
+      
+      <p style="color: #c62828; font-weight: bold; font-size: 16px;">${d.rejectionReason || ''}</p> 
+
+      <p>You have been added to the <strong>Waitlist</strong>. If a space becomes available, your manager will be alerted.</p>
+      
+      <div style="background-color: #ffebee; border-left: 6px solid #c62828; padding: 20px; margin: 25px 0; border-radius: 4px;">
+        <div style="margin-bottom: 8px;"><strong>Status:</strong> <span style="font-weight: bold; color: #c62828;">Rejected (Cap)</span></div>
+        <div style="margin-bottom: 8px;"><strong>Dates Requested:</strong> ${d.startDate} to ${d.endDate}</div>
+        <div><strong>Duration:</strong> ${d.totalDays} Days</div>
+      </div>
+      
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #073763; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // Template: Welcome Email (Professional, No Emojis)
+  _getTemplate_Welcome: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Portal Access Information</h2>
+      <p>Hi ${d.name},</p>
+      <p>Your account for the <strong>Wickes Holiday Portal</strong> has been successfully created.</p>
+      
+      <p>You can now log in to manage your holiday allowance, submit requests, and view your team's availability (if applicable). The portal replaces the previous tracker system to ensure real-time accuracy.</p>
+      
+      <div style="background-color: #f4f4f4; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #ddd;">
+        <p style="margin: 0; font-size: 14px; color: #555;"><strong>Note:</strong> Access is managed via your Google Account. No separate password is required.</p>
+      </div>
+
+      <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Open Holiday Portal</a>
+      
+      <p style="margin-top: 25px; font-size: 14px; color: #666;">If you have any questions regarding your allowance, please contact your Line Manager.</p>
+    `;
+    return this._wrapHtml(body);
+  },
+  
+  checkWaitlistAndNotify: function(data) {
+    // Placeholder
+  }
+};
+
+
+
+// ==========================================
+// AMENDMENT EMAIL LOGIC (Appended)
+// ==========================================
+
+EmailService.sendAmendmentEmail = function(d) {
+  const managerEmail = this.getManagerEmail(d.department, 'Manager');
+  const html = this._getTemplate_Amendment(d);
+  this._send(d.requesterEmail, "Holiday Request Amended: " + d.requesterName, html, managerEmail);
+};
+
+EmailService._getTemplate_Amendment = function(d) {
+  const body = `
+    <h2 style="color: #073763; margin-top: 0;">Holiday Amended</h2>
+    <p>Hi ${d.requesterName},</p>
+    <p>Your holiday request has been updated.</p>
+    
+    <div style="background-color: #f4f4f4; border-left: 6px solid #757575; padding: 15px; margin: 20px 0; border-radius: 4px; opacity: 0.8;">
+      <h3 style="margin-top:0; color:#555; font-size:14px; text-transform:uppercase;">Previous Request</h3>
+      <div><strong>Dates:</strong> ${d.oldDates}</div>
+      <div><strong>Days:</strong> ${d.oldDays}</div>
+    </div>
+
+    <div style="background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; margin: 20px 0; border-radius: 4px;">
+      <h3 style="margin-top:0; color:#2e7d32; font-size:14px; text-transform:uppercase;">New Details</h3>
+      <div><strong>Dates:</strong> ${d.newDates}</div>
+      <div><strong>Days:</strong> ${d.newDays}</div>
+    </div>
+    
+    <a href="${d.appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #009ee3; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold;">View Portal</a>
+  `;
+  return this._wrapHtml(body);
+};

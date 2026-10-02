@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <style>
+    :root {
+      /* Keep your original colors */
+      --wickes-blue: #073763;
+      --wickes-green: #92bc20;
+      --wickes-red: #dd052a;
+      --wickes-yellow: #ffdd00;
+      --wickes-cyan: #009ee3;
+      --bg-grey: #f4f4f4;
+      --border-color: #ccc;
+
+      /* ADD: The Gradient Palette */
+      --grad-primary-blue: linear-gradient(135deg, #073763, #0b559b);
+      --grad-cyan: linear-gradient(135deg, #009ee3, #33bdf2);
+      --grad-green: linear-gradient(135deg, #92bc20, #a8d12d);
+      --grad-yellow: linear-gradient(135deg, #ffdd00, #ffea4d);
+      --grad-red: linear-gradient(135deg, #dd052a, #ff2e52);
+      --grad-grey: linear-gradient(135deg, #9ea2a2, #7a7e7e);
+    }
+    body { margin: 0; font-family: 'Roboto', sans-serif; background: var(--bg-grey); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; border-left: 1px solid #ccc; }
+    ::-webkit-scrollbar-thumb { background: #bbb; border-radius: 6px; border: 2px solid #f1f1f1; }
+    ::-webkit-scrollbar-thumb:hover { background: #999; }
+
+    /* Header */
+    .top-bar { background: var(--wickes-blue); color: white; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 600; flex-shrink: 0; height: 60px; }
+    .brand-group { display: flex; align-items: center; gap: 15px; }
+    .logo { height: 38px; width: auto; display: block; }
+    .page-title { margin: 0; font-size: 1.4em; font-weight: 700; letter-spacing: 0.5px; color: white; }
+
+    .controls { display: flex; gap: 15px; align-items: center; }
+    
+    /* Standard Selects */
+    select.std-select { padding: 8px 10px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; background: white; color: var(--wickes-blue); }
+    
+    /* === MULTI-SELECT STYLES === */
+    .multiselect-container { position: relative; display: inline-block; min-width: 200px; }
+    .multiselect-btn { 
+        background: white; color: var(--wickes-blue); padding: 8px 15px; 
+        border-radius: 4px; border: none; font-weight: bold; cursor: pointer; 
+        display: flex; justify-content: space-between; align-items: center; width: 100%;
+        box-sizing: border-box;
+    }
+    .multiselect-btn:after { content: '\25BC'; font-size: 0.8em; margin-left: 10px; }
+    
+    .multiselect-content {
+        display: none; position: absolute; background-color: #f9f9f9; 
+        min-width: 250px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); 
+        z-index: 999; max-height: 400px; overflow-y: auto; border-radius: 4px;
+        top: 100%; left: 0; margin-top: 5px;
+    }
+    .multiselect-content.show { display: block; }
+    .multiselect-item { padding: 8px 12px; display: flex; align-items: center; cursor: pointer; border-bottom: 1px solid #eee; color: #333; }
+    .multiselect-item:hover { background-color: #ddd; }
+    .multiselect-item input { margin-right: 10px; transform: scale(1.2); cursor: pointer; }
+    .multiselect-item label { cursor: pointer; flex-grow: 1; font-size: 0.9em; user-select: none;}
+    .multiselect-actions { padding: 8px; background: #eee; text-align: right; position: sticky; bottom: 0; }
+    .btn-apply { background: var(--wickes-blue); color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-weight: bold; }
+
+    /* Refresh Button */
+    .refresh-btn { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
+    .refresh-btn:hover { background: rgba(255,255,255,0.3); }
+
+    /* Main Content */
+    #main-container { flex-grow: 1; overflow: auto; position: relative; background: white; }
+    
+    /* === GRID TABLE STYLING === */
+    table { border-collapse: separate; border-spacing: 0; font-size: 11px; width: max-content; cursor: default; }
+    th, td { border: 1px solid #ccc; padding: 0px 4px; text-align: center; white-space: nowrap; box-sizing: border-box; }
+    
+    /* Headers */
+    thead tr:nth-child(1) th { position: sticky; top: 0; height: 35px; background: var(--wickes-blue); color: white; z-index: 100; border-color: #052a4d; }
+    thead tr:nth-child(2) th { position: sticky; top: 35px; height: 35px; background: var(--wickes-blue); color: white; z-index: 100; border-color: #052a4d; vertical-align: middle; }
+    thead tr:nth-child(3) th { position: sticky; top: 70px; height: 25px; z-index: 100; background: #eef; color: #333; font-weight: bold; border-bottom: 2px solid #999; }
+
+    /* Sticky Columns */
+    td.col-fixed { position: sticky; left: 0; z-index: 110; background-color: #fff; border-right: 2px solid #999; min-width: 200px; max-width: 200px; text-align: left; padding-left: 10px; height: 30px; }
+    thead tr:nth-child(1) th.col-fixed-corner { position: sticky; left: 0; top: 0; z-index: 200; background-color: var(--wickes-blue); border-right: 2px solid #052a4d; }
+    thead tr:nth-child(3) th.col-fixed-cap { position: sticky; left: 0; top: 70px; z-index: 200; background-color: #ddd; border-right: 2px solid #999; }
+
+    /* MONTH HEADER COUNT */
+    .month-total-badge {
+        display: block; 
+        font-size: 0.8em; 
+        background: rgba(0,0,0,0.2); 
+        padding: 2px 6px; 
+        border-radius: 10px; 
+        margin-left: 5px; 
+        font-weight: normal;
+        display: inline-block;
+    }
+
+    /* Interactions */
+    tbody tr:hover td:not(.col-fixed) { background-color: #e6f7ff; }
+    tr.selected-row td { border-top: 2px solid var(--wickes-blue) !important; border-bottom: 2px solid var(--wickes-blue) !important; }
+    tr.selected-row td.col-fixed { background-color: #fffbcc !important; border-left: 5px solid var(--wickes-blue); color: black; }
+    tr.selected-row td.cell-w { background-color: #fffbcc !important; }
+
+    /* Remaining Days Badge */
+    .rem-badge { background-color: var(--wickes-blue); color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.85em; font-weight: bold; float: right; margin-right: 5px; }
+    .rem-badge.low { background-color: var(--wickes-red); }
+    .rem-badge.good { background-color: var(--wickes-green); color: black; }
+
+    /* === STATUS CELLS === */
+    .cell-h { background-color: var(--wickes-green); color: white !important; font-weight: bold; border-color: #7a9c1b; }
+    .cell-hd { background-color: #ff9800; color: black; font-weight: bold; border-color: #e68900; }
+    .cell-p { background-color: var(--wickes-yellow); color: black; font-weight: bold; border-color: #e6c700; }
+    .cell-sick { background-color: var(--wickes-red); color: white; font-weight: bold; border-color: #b30422; }
+    .cell-fam { background-color: var(--wickes-cyan); color: white; font-weight: bold; border-color: #0077aa; }
+    .cell-other { background-color: #333; color: white; font-weight: bold; border-color: #000; }
+    .cell-rd { background-color: #333; color: #333; border-color: #222; } 
+    .cell-w { background-color: #fff; }
+    
+    .cell-c, .cell-rejected { background-color: #333333 !important; color: #ff4d4d !important; text-decoration: none !important; font-weight: bold !important; border-color: #222 !important; }
+    .cell-cpc { background-color: #0056b3; color: white; font-weight: bold; border-color: #004494; }
+    .cell-da { background-color: var(--wickes-red); color: white; font-weight: bold; border-color: #b30422; }
+    .header-cap-full { background-color: #dd052a !important; color: white !important; font-weight: bold; border-color: #b30422 !important; }
+    .cell-pa { background-color: #9c27b0 !important; color: white !important; font-weight: bold !important; border-color: #7b1fa2 !important; }
+
+    /* Calendar View */
+    #calendarViewContainer { padding: 20px; overflow-y: auto; height: 100%; box-sizing: border-box; display: none; background-color: #f9f9f9; }
+    .yearly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; padding-bottom: 60px; }
+    .month-card { background: white; border: 1px solid #ddd; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .month-title { text-align: center; font-weight: bold; color: var(--wickes-blue); margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+    .month-card .flatpickr-calendar { width: 100% !important; box-shadow: none !important; }
+    .month-card .flatpickr-months { display: none !important; }
+    .month-card .flatpickr-day { color: #222 !important; font-weight: 700 !important; font-size: 13px !important; }
+    .month-card .flatpickr-day.weekend-date { color: #999 !important; background: #eee !important; font-weight: 700 !important; }
+
+    /* Loading */
+    #loader { position: fixed; inset: 0; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; z-index: 3000; flex-direction: column; }
+    .spinner { border: 5px solid #f3f3f3; border-top: 5px solid var(--wickes-blue); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 10px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Column Highlighting */
+    .selected-col-header {
+        background-color: var(--wickes-yellow) !important;
+        color: var(--wickes-blue) !important;
+        border: 2px solid var(--wickes-blue) !important;
+    }
+
+    /* Apply gradient to the top bar and sticky table headers */
+    .top-bar, 
+    thead tr:nth-child(1) th, 
+    thead tr:nth-child(2) th, 
+    thead tr:nth-child(1) th.col-fixed-corner {
+        background: var(--grad-primary-blue) !important;
+    }
+
+    /* Update the Apply Filter button */
+    .btn-apply { 
+        background: var(--grad-primary-blue) !important; 
+    }
+
+    /* Apply the glass shine to all colored tracker cells */
+    .cell-h, .cell-hd, .cell-pa, .cell-c, .cell-rejected, 
+    .cell-cpc, .cell-da, .cell-sick, .cell-fam, .cell-other, .cell-ap {
+        background-image: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(0,0,0,0.15) 100%) !important;
+    }
+
+    /* Column Highlighting - Upgraded to override the gradient */
+    thead tr:nth-child(2) th.selected-col-header {
+        background: var(--wickes-yellow) !important;
+        color: var(--wickes-blue) !important;
+        border: 2px solid var(--wickes-blue) !important;
+    }
+
+    /* Steady Progress Bar Wipe Animation */
+    @keyframes loading-wipe {
+        0% { clip-path: inset(0 100% 0 0); }
+        100% { clip-path: inset(0 0 0 0); }
+    }
+
+    /* Container to hold the stacked cards */
+    .loader-wrapper {
+        position: relative;
+        border-radius: 8px;
+        box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+        overflow: hidden;
+    }
+
+    /* Base Layer: Instantly readable white card with dark text */
+    .base-loading-card {
+        background: #ffffff;
+        padding: 12px 25px;
+        display: flex;
+        align-items: center;
+        gap: 15px; 
+    }
+
+    /* Top Layer: Blue gradient card that wipes over the base layer */
+    .premium-loading-card {
+        background: linear-gradient(135deg, #073763 0%, #009ee3 100%);
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        padding: 12px 25px;
+        display: flex;
+        align-items: center;
+        gap: 15px; 
+        box-sizing: border-box;
+        animation: loading-wipe 10s linear forwards; 
+    }
+
+    /* Yellow gradient accent line on the animated card */
+    .premium-loading-card::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 6px;
+        background: linear-gradient(to bottom, #ffdd00 0%, #ffea4d 100%);
+    }
+
+    /* --- Element Sizing Classes --- */
+    /* Height adjusted slightly to better fit the portal's sub-logo proportions */
+    .loader-logo { 
+        height: 45px; 
+        width: auto; 
+        object-fit: contain; 
+        transform: scale(1.4); /* Adjust this number to make it bigger/smaller (1.0 is default) */
+        transform-origin: left center; /* Keeps it aligned properly with the text */
+        margin-right: 15px; /* Adds a bit of breathing room so it doesn't overlap the divider */
+    }
+    .loader-divider { width: 2px; height: 32px; border-radius: 2px; }
+    .loader-text { margin: 0; font-family: var(--default-font, 'Roboto', sans-serif); font-size: 1.2em; font-weight: 300; letter-spacing: 1px; white-space: nowrap; }
+
+    /* Color assignments */
+    .base-loading-card .loader-divider { background: rgba(0,0,0,0.15); }
+    .base-loading-card .loader-text { color: #313d47; }
+    .premium-loading-card .loader-divider { background: rgba(255,255,255,0.15); }
+    .premium-loading-card .loader-text { color: #ffffff; }
+  </style>
+</head>
+<body>
+
+<!-- Global Loading Screen Overlay -->
+<div id="global-loader" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255, 255, 255, 0.2); z-index: 10001; align-items: center; justify-content: center; backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);">
+    
+    <!-- IMPORTANT: The ID below is required for mobile scaling -->
+    <div class="loader-wrapper" id="axis-loader-card">
+        
+        <!-- BASE CARD (White background, black text) -->
+        <div class="base-loading-card">
+            <img src="https://i.postimg.cc/cJQ9HbKk/holiday-Portal.png" alt="Holiday Portal Logo" class="loader-logo">
+            <div class="loader-divider"></div>
+            <h2 class="loader-text">Loading...</h2>
+        </div>
+
+        <!-- ANIMATED OVERLAY (Blue gradient, white text) -->
+        <div class="premium-loading-card">
+            <img src="https://i.postimg.cc/cJQ9HbKk/holiday-Portal.png" alt="Holiday Portal Logo" class="loader-logo">
+            <div class="loader-divider"></div>
+            <h2 class="loader-text">Loading...</h2>
+        </div>
+        
+    </div>
+</div>
+
+<!-- Hardware Screen Detection Script for Mobile Scaling -->
+<script>
+    // Reads physical hardware pixels to bypass Apps Script iframe restrictions
+    if (screen.width <= 768) {
+        var axisLoader = document.getElementById('axis-loader-card');
+        if (axisLoader) {
+            // Overpowers the 1200px viewport shrink effect to keep the loader legible
+            axisLoader.style.transform = 'scale(3.5)';
+            axisLoader.style.transformOrigin = 'center';
+        }
+    }
+</script>
+  <div class="top-bar">
+    <div class="brand-group">
+        <img src="https://static-content.wickes.co.uk/wickes-css2@2.94.0/build/img/wickes-logo.svg" alt="Wickes Logo" class="logo">
+        <h1 class="page-title">Holiday Tracker</h1>
+    </div>
+    
+    <div class="controls">
+      <div class="multiselect-container">
+          <button id="deptFilterBtn" class="multiselect-btn" onclick="toggleFilterMenu()">Loading...</button>
+          <div id="deptFilterContent" class="multiselect-content">
+              <div class="multiselect-actions">
+                  <button class="btn-apply" onclick="applyFilter()">Apply Filter</button>
+              </div>
+          </div>
+      </div>
+
+      <select id="yearFilter" class="std-select" onchange="refreshData()">
+        </select>
+      <select id="viewMode" class="std-select" onchange="toggleView()">
+        <option value="grid">Grid View</option>
+        <option value="calendar">Individual Calendar View</option>
+      </select>
+      <button class="refresh-btn" onclick="refreshData()" title="Reload Data">
+        <i class="fas fa-sync-alt"></i> Refresh
+      </button>
+    </div>
+  </div>
+
+  <div id="main-container">
+    <table id="trackerTable">
+      <thead id="tableHead"></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    
+    <div id="calendarViewContainer">
+        <div style="margin-bottom: 20px; display:flex; align-items:center; gap:10px; background:#fff; padding:15px; border-radius:8px; border:1px solid #ddd;">
+            <label style="font-weight:bold; color:var(--wickes-blue);">Viewing Calendar For: </label>
+            <select id="userSelector" onchange="renderIndividualCalendar()" style="border:1px solid #ccc; font-weight:normal; padding: 5px; min-width: 250px;"></select>
+        </div>
+        <div id="individualCalendarGrid" class="yearly-grid"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script>
+    let DATA = null;
+    let FAST_MAP = { events: {}, requests: {} };
+    let WORK_CACHE = {}; 
+    let SELECTED_DEPTS = ["All"]; // Default to All
+
+    const CSS_MAP = {
+        'H': 'cell-h', 'HD': 'cell-hd', 'HD1': 'cell-hd', 'HD2': 'cell-hd', 'PA': 'cell-pa', 'C': 'cell-c', 'R': 'cell-rejected',  
+        'CPC': 'cell-cpc', 'DA': 'cell-da',
+        'SP': 'cell-sick', 'SSP': 'cell-sick', 'SHP': 'cell-sick', 'UPS': 'cell-sick',
+        'ML': 'cell-fam', 'PL': 'cell-fam', 'BL': 'cell-fam', 'CL': 'cell-fam', 'PRL': 'cell-fam',
+        'UA': 'cell-other', 'WD': 'cell-other', 'JS': 'cell-other', 'W': 'cell-w', 'AA': 'cell-aa', 'AP': 'cell-ap' 
+    };
+
+    const TOOLTIPS = {
+        'H': 'Holiday', 'HD': 'Half Day', 'HD1': '1st Half Day', 'HD2': '2nd Half Day', 'PA': 'Paid Absence (Xmas Eve)', 
+        'CPC': 'Driver CPC Training', 'DA': 'Driving Assessment',
+        'SP': 'Sick Paid', 'SSP': 'Statutory Sick Pay', 'SHP': 'Sick Half Pay', 'UPS': 'Unpaid Sick', 'PSS': 'Part Shift Sick',
+        'ML': 'Maternity Leave', 'PL': 'Paternity Leave', 'BL': 'Bereavement Leave', 
+        'CL': 'Compassionate Leave', 'PRL': 'Parental Leave',
+        'UA': 'Unauthorised Absence', 'JS': 'Jury Service', 'WD': 'Waiting Day'
+    };
+
+    function getSafeLocalISO(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const year = new Date().getFullYear();
+      const mainContainer = document.getElementById('main-container');
+      mainContainer.addEventListener('wheel', function(e) {
+          // 1. Ignore if we are in the individual calendar view
+          if (document.getElementById('viewMode').value !== 'grid') return;
+
+          // 2. Let the browser scroll normally if hovering over the colleague list or headers
+          if (e.target.closest('.col-fixed') || e.target.closest('th') || e.target.closest('thead')) {
+              return;
+          }
+
+          // 3. Let native shift+scroll work if they are holding the shift key
+          if (e.shiftKey) return;
+
+          // 4. Cursor is over the date grid: Convert vertical wheel to horizontal scroll!
+          e.preventDefault();
+
+          // You asked for: Up = Right, Down = Left
+          // Wheel Up (Negative deltaY) -> Move Right (Increase scrollLeft)
+          // Wheel Down (Positive deltaY) -> Move Left (Decrease scrollLeft)
+          this.scrollLeft -= (e.deltaY * 1.5); // The * 1.5 just gives it a nice speed boost
+      });
+      // --- DYNAMIC YEAR DROPDOWN ---
+      const yearFilter = document.getElementById('yearFilter');
+      yearFilter.innerHTML = ''; 
+      
+      // Automatically load Previous Year, Current Year, and Next Year
+      const prevYear = year - 1;
+      const nextYear = year + 1;
+      
+      yearFilter.innerHTML += `<option value="${prevYear}">${prevYear}</option>`;
+      yearFilter.innerHTML += `<option value="${year}" selected>${year}</option>`;
+      yearFilter.innerHTML += `<option value="${nextYear}">${nextYear}</option>`;
+      // -----------------------------
+
+      google.script.run.withSuccessHandler((json) => init(JSON.parse(json))).getTrackerData(year);
+      
+      // Close dropdown if clicking outside
+      document.addEventListener('click', function(e) {
+          const container = document.querySelector('.multiselect-container');
+          if (!container.contains(e.target)) {
+              document.getElementById('deptFilterContent').classList.remove('show');
+          }
+      });
+    });
+
+    function init(data) {
+        if (!data) { alert("Connection Error."); return; }
+        if (!data.success) { 
+            document.body.innerHTML = `<div style="display:flex; height:100vh; width:100%; align-items:center; justify-content:center; flex-direction:column; background:#f4f4f4; font-family:'Roboto',sans-serif; text-align:center;"><h2 style="color:#073763;">Access Restricted</h2><p>${data.error}</p><button onclick="window.close()" style="padding:10px 20px; background:#073763; color:white; border:none; border-radius:4px; cursor:pointer;">Close Tab</button></div>`;
+            return; 
+        }
+        DATA = data;
+        buildFastLookups();
+
+        // --- SETUP MULTI-SELECT ---
+        const depts = [...new Set(DATA.users.map(u => u.dept))].sort();
+        const groups = [
+            { val: "Group_AM", text: "AM Shift (Group)" },
+            { val: "Group_PM", text: "PM Shift (Group)" },
+            { val: "Group_NT", text: "NT Shift (Group)" },
+            { val: "Stock Compliance", text: "Stock Compliance (Group)" },
+            { val: "Transport_Drivers", text: "Transport Drivers (Group)" },
+            { val: "Transport_Admin", text: "Transport Admin (Group)" },
+            { val: "Group_OpsMgr", text: "Ops Managers (Group)" } 
+    ];
+
+        const menu = document.getElementById('deptFilterContent');
+        const actionsDiv = menu.querySelector('.multiselect-actions'); // Save the actions button
+        menu.innerHTML = ''; // Clear old
+
+        // 1. Add "Select All" Option (Special)
+        addCheckbox(menu, "All", "All Departments", true);
+        
+        // 2. Add Groups
+        groups.forEach(g => addCheckbox(menu, g.val, g.text));
+        
+        // 3. Add Line separator
+        const hr = document.createElement('div');
+        hr.style.borderBottom = "1px solid #ccc"; hr.style.margin = "5px 0";
+        menu.appendChild(hr);
+
+        // 4. Add Departments
+        depts.forEach(d => { if(d) addCheckbox(menu, d, d); });
+
+        // 5. Restore Actions Button
+        menu.appendChild(actionsDiv);
+
+        // 6. Restore Selection from Cache
+        const savedCache = localStorage.getItem('wickes_tracker_dept_v3');
+        if (savedCache) {
+            try {
+                // Support both legacy single string and new JSON array
+                if (savedCache.startsWith('[')) {
+                    SELECTED_DEPTS = JSON.parse(savedCache);
+                } else {
+                    SELECTED_DEPTS = [savedCache];
+                }
+            } catch(e) { SELECTED_DEPTS = ["All"]; }
+        } else {
+            SELECTED_DEPTS = ["All"];
+        }
+
+        // Apply checkbox states based on cache
+        syncCheckboxes();
+        updateBtnLabel();
+
+        // Sort users for faster rendering
+        DATA.users.sort((a,b) => {
+            const deptA = (a.dept || "").toLowerCase();
+            const deptB = (b.dept || "").toLowerCase();
+            if (deptA < deptB) return -1;
+            if (deptA > deptB) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        triggerRender();
+    }
+
+    function addCheckbox(container, value, label) {
+        const div = document.createElement('div');
+        div.className = 'multiselect-item';
+        div.innerHTML = `<input type="checkbox" value="${value}" id="chk_${value}"><label for="chk_${value}">${label}</label>`;
+        // Click handler for the row
+        div.addEventListener('click', function(e) {
+            if (e.target.tagName !== 'INPUT') {
+                const chk = div.querySelector('input');
+                chk.checked = !chk.checked;
+            }
+            // Logic: If 'All' is clicked, uncheck others. If other is clicked, uncheck 'All'.
+            const target = div.querySelector('input');
+            if (value === 'All' && target.checked) {
+                container.querySelectorAll('input').forEach(i => { if(i.value !== 'All') i.checked = false; });
+            } else if (value !== 'All' && target.checked) {
+                const allChk = document.getElementById('chk_All');
+                if(allChk) allChk.checked = false;
+            }
+        });
+        container.appendChild(div);
+    }
+
+    function syncCheckboxes() {
+        const boxes = document.querySelectorAll('.multiselect-item input');
+        boxes.forEach(b => b.checked = false);
+        SELECTED_DEPTS.forEach(val => {
+            const el = document.getElementById(`chk_${val}`);
+            if (el) el.checked = true;
+        });
+    }
+
+    function toggleFilterMenu() {
+        document.getElementById('deptFilterContent').classList.toggle('show');
+    }
+
+    function applyFilter() {
+        // Read checked boxes
+        const checked = Array.from(document.querySelectorAll('.multiselect-item input:checked')).map(c => c.value);
+        if (checked.length === 0) {
+            SELECTED_DEPTS = ["All"];
+            document.getElementById('chk_All').checked = true;
+        } else {
+            SELECTED_DEPTS = checked;
+        }
+        
+        // Save to cache
+        localStorage.setItem('wickes_tracker_dept_v3', JSON.stringify(SELECTED_DEPTS));
+        
+        updateBtnLabel();
+        document.getElementById('deptFilterContent').classList.remove('show');
+        triggerRender();
+    }
+
+    function updateBtnLabel() {
+        const btn = document.getElementById('deptFilterBtn');
+        if (SELECTED_DEPTS.includes("All")) {
+            btn.textContent = "All Departments";
+        } else if (SELECTED_DEPTS.length === 1) {
+            // Find pretty name
+            const label = document.querySelector(`label[for="chk_${SELECTED_DEPTS[0]}"]`).textContent;
+            btn.textContent = label;
+        } else {
+            btn.textContent = `Filter: ${SELECTED_DEPTS.length} Selected`;
+        }
+    }
+
+    function buildFastLookups() {
+        FAST_MAP = { events: {}, requests: {} };
+        DATA.dbEvents.forEach(e => {
+            const p = String(e.payroll);
+            if (!FAST_MAP.events[p]) FAST_MAP.events[p] = {};
+            FAST_MAP.events[p][e.date] = e; 
+        });
+        DATA.requests.forEach(r => {
+            const p = String(r.payroll);
+            if (!FAST_MAP.requests[p]) FAST_MAP.requests[p] = {};
+            let dates = [];
+            try { dates = JSON.parse(r.json); } catch(e) {
+                let d = new Date(r.start);
+                const end = new Date(r.end);
+                while(d <= end) {
+                    dates.push(getSafeLocalISO(d));
+                    d.setDate(d.getDate() + 1);
+                }
+            }
+            if (dates && dates.length > 0) {
+                dates.forEach(dateIso => { FAST_MAP.requests[p][dateIso] = r; });
+            }
+        });
+        console.log("Indexes Built");
+    }
+
+    function triggerRender() {
+        const loader = document.getElementById('global-loader');
+        loader.style.display = 'flex';
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                if (document.getElementById('viewMode').value === 'grid') renderGrid();
+                else setupUserSelector();
+            }, 50);
+        });
+    }
+
+    function triggerRender() {
+        const loader = document.getElementById('global-loader');
+        loader.style.display = 'flex';
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                if (document.getElementById('viewMode').value === 'grid') renderGrid();
+                else setupUserSelector();
+            }, 50);
+        });
+    }
+
+    function toggleView() {
+        triggerRender();
+        const mode = document.getElementById('viewMode').value;
+        const grid = document.getElementById('trackerTable');
+        const cal = document.getElementById('calendarViewContainer');
+        if (mode === 'grid') { grid.style.display = 'table'; cal.style.display = 'none'; } 
+        else { grid.style.display = 'none'; cal.style.display = 'block'; }
+    }
+
+    // --- MAIN GRID RENDERER ---
+    function renderGrid() {
+      const year = parseInt(document.getElementById('yearFilter').value);
+      const thead = document.getElementById('tableHead');
+      const tbody = document.getElementById('tableBody');
+      
+      thead.innerHTML = ''; tbody.innerHTML = '';
+      const daysInYear = [];
+      let d = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31);
+      const monthsMap = {};
+      const dailyCounts = {};
+
+      const trMonths = document.createElement('tr');
+      const trDays = document.createElement('tr');
+      const trCap = document.createElement('tr');
+      
+      // --- FILTER USERS (Multi-Select Logic) ---
+      const users = getUsersByDept(SELECTED_DEPTS);
+      const isCY = year === new Date().getFullYear();
+
+      // --- CALCULATE TEAM TOTALS (New Feature) ---
+      let teamBooked = 0;
+      let teamTotal = 0;
+
+      users.forEach(u => {
+          const allow = isCY ? u.allowance.cy : u.allowance.ny;
+          const b = Number(allow.booked || 0);
+          const r = Number(allow.rem || 0);
+          
+          // Total Allowance = Booked + Remaining
+          const totalAllowance = b + r;
+          
+          teamBooked += b;
+          teamTotal += totalAllowance;
+      });
+
+      // --- HEADER CORNER (With Stats) ---
+      const thCorner = document.createElement('th');
+      thCorner.className = "col-fixed-corner";
+      thCorner.innerHTML = `
+        <div style="display:flex; flex-direction:column; justify-content:center; height:100%;">
+            <span>Colleague</span>
+
+<span style="font-size:0.8em; font-weight:normal; opacity:0.8; margin-top:2px;">
+    ${parseFloat(teamBooked.toFixed(1))} / ${parseFloat(teamTotal.toFixed(1))}
+</span>
+        </div>
+      `;
+      thCorner.rowSpan = 2; 
+      trMonths.appendChild(thCorner);
+
+      // --- CAP RULES ---
+      let deptRules = null;
+      if (SELECTED_DEPTS.length === 1 && SELECTED_DEPTS[0] !== 'All' && SELECTED_DEPTS[0] !== 'Stock Compliance') {
+          deptRules = DATA.capacity ? DATA.capacity[SELECTED_DEPTS[0]] : null;
+      }
+
+      const thCapCorner = document.createElement('th');
+      const isGroupMode = SELECTED_DEPTS.includes("All") || SELECTED_DEPTS.length > 1 || SELECTED_DEPTS[0].includes('Group');
+      thCapCorner.textContent = isGroupMode ? "Total Off" : "Staff Off / Cap";
+      thCapCorner.className = "col-fixed-cap"; 
+      trCap.appendChild(thCapCorner);
+
+      let mIdx = 0;
+      let lastMonth = "";
+
+      while (d <= endDate) {
+        const iso = getSafeLocalISO(d);
+        daysInYear.push({ date: new Date(d), iso: iso, dayOfWeek: d.getDay(), month: d.getMonth() });
+        dailyCounts[iso] = 0;
+        const m = d.toLocaleString('default', { month: 'short' });
+        
+        if (!monthsMap[m]) monthsMap[m] = { count: 0, index: mIdx++ };
+        monthsMap[m].count++;
+        
+        const th = document.createElement('th');
+        const dayName = d.toLocaleDateString('en-GB', { weekday: 'short' });
+        th.innerHTML = `${d.getDate()}<br><span style="font-size:9px; font-weight:normal; opacity:0.8;">${dayName}</span>`;
+        th.style.minWidth = "30px";
+        th.style.cursor = "pointer"; // Makes it look clickable
+        if (d.getDay() === 0 || d.getDay() === 6) th.style.backgroundColor = "#052a4d";
+        
+        th.onclick = function() {
+            const isAlreadySelected = this.classList.contains('selected-col-header');
+            
+            // Clear existing header highlights
+            document.querySelectorAll('.selected-col-header').forEach(el => el.classList.remove('selected-col-header'));
+            
+            // Setup dynamic style tag if it doesn't exist
+            let styleTag = document.getElementById('dynamic-col-highlight');
+            if (!styleTag) {
+                styleTag = document.createElement('style');
+                styleTag.id = 'dynamic-col-highlight';
+                document.head.appendChild(styleTag);
+            }
+
+            // If it was already highlighted, clicking again toggles it off
+            if (isAlreadySelected) {
+                styleTag.innerHTML = '';
+                return;
+            }
+
+            // Apply new highlight to the header
+            this.classList.add('selected-col-header');
+            
+            // Calculate column index (+2 because nth-child is 1-based, and we skip the fixed 'Colleague' column)
+            const nthIndex = Array.from(this.parentNode.children).indexOf(this) + 2;
+            
+            // Inject CSS to instantly highlight the entire column safely
+            styleTag.innerHTML = `
+                /* Apply blue borders to the whole column to show the highlight */
+                #tableBody tr td:nth-child(${nthIndex}),
+                #tableHead tr:nth-child(3) th:nth-child(${nthIndex}) {
+                    border-left: 2px solid var(--wickes-blue) !important;
+                    border-right: 2px solid var(--wickes-blue) !important;
+                }
+                
+                /* ONLY apply the pale yellow background to EMPTY working days */
+                #tableBody tr td.cell-w:nth-child(${nthIndex}) {
+                    background-color: #fffbcc !important;
+                }
+                
+                /* Highlight the header cap cell too */
+                #tableHead tr:nth-child(3) th:nth-child(${nthIndex}) {
+                    background-color: #fffbcc !important;
+                    color: black !important;
+                }
+            `;
+        };
+        // --- END OF NEW LOGIC ---
+
+        trDays.appendChild(th);
+        
+        const thCap = document.createElement('th');
+        thCap.id = `cap-${iso}`; trCap.appendChild(thCap);
+        d.setDate(d.getDate() + 1);
+      }
+
+      // Build Month Headers with ID for updating later
+      for (const [m, obj] of Object.entries(monthsMap)) {
+        const th = document.createElement('th');
+        // Initial Text
+        th.innerHTML = `${m} <span id="month-total-${obj.index}" class="month-total-badge">...</span>`;
+        th.colSpan = obj.count; 
+        trMonths.appendChild(th);
+      }
+
+      thead.appendChild(trMonths); thead.appendChild(trDays); thead.appendChild(trCap);
+
+      WORK_CACHE = {};
+      // Include the xmasGroup directly in the cache combo
+      const uniqueCombos = [...new Set(users.map(u => u.pattern + "|||" + u.dept + "|||" + (u.xmasGroup || "")))];
+      
+      uniqueCombos.forEach(combo => {
+          const [pCode, dept, xGroup] = combo.split("|||");
+          WORK_CACHE[combo] = {};
+          daysInYear.forEach(dayObj => {
+              // Pass the explicit xGroup to the checker
+              WORK_CACHE[combo][dayObj.iso] = isWorkingDay(dayObj.date, pCode, dept, xGroup);
+          });
+      });
+
+      let currentIndex = 0;
+      const BATCH_SIZE = 300; 
+
+      function processBatch() {
+          const end = Math.min(currentIndex + BATCH_SIZE, users.length);
+          const frag = document.createDocumentFragment();
+
+          for (let i = currentIndex; i < end; i++) {
+              const user = users[i];
+              const tr = document.createElement('tr');
+              tr.onclick = function() {
+                  const current = document.querySelector('.selected-row');
+                  if (current) current.classList.remove('selected-row');
+                  this.classList.add('selected-row');
+              };
+
+              let remDays = user.allowance ? (isCY ? user.allowance.cy.rem : user.allowance.ny.rem) : 0;
+              const badgeClass = remDays < 5 ? 'rem-badge low' : 'rem-badge good';
+
+              const tdName = document.createElement('td'); 
+              tdName.className = "col-fixed";
+              tdName.innerHTML = `
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                      <div><strong>${user.name}</strong><br><span style="color:#666;font-size:0.9em">${user.dept}</span></div>
+                      <div class="${badgeClass}" title="Remaining">${remDays}</div>
+                  </div>`;
+              tr.appendChild(tdName);
+
+              const userEvents = FAST_MAP.events[String(user.payroll)] || {};
+              const userRequests = FAST_MAP.requests[String(user.payroll)] || {};
+              const comboKey = user.pattern + "|||" + user.dept + "|||" + (user.xmasGroup || "");
+              const workMap = WORK_CACHE[comboKey] || {};
+
+              daysInYear.forEach(dayObj => {
+                  const td = document.createElement('td');
+                  const isWork = workMap[dayObj.iso];
+                  const dbEv = userEvents[dayObj.iso];
+                  const req = userRequests[dayObj.iso];
+                  
+                  let cellClass = 'cell-w'; 
+                  let text = '';
+                  let title = '';
+
+                  if (!isWork) cellClass = 'cell-rd';
+                  
+                  if (dbEv) {
+                      const code = dbEv.code;
+                      cellClass = CSS_MAP[code] || 'cell-h'; 
+                      text = code;
+                      title = TOOLTIPS[code] || code;
+
+                   
+                      // Do NOT include codes starting with C (like CPC) or other leave types
+                      if (['H', 'HD', 'HD1', 'HD2'].includes(code)) {
+                          dailyCounts[dayObj.iso] += (code === 'H' ? 1 : 0.5);
+                      }
+                  } 
+                  else if (req) {
+                      if (req.status === 'Pending') {
+                          cellClass = 'cell-p'; text = 'P'; title = "Pending";
+                      }
+                      else if (req.status && req.status.includes('Rejected')) {
+                          cellClass = 'cell-rejected'; text = 'R'; title = req.status;
+                      }
+                  }
+                  
+                  td.className = cellClass;
+                  td.textContent = text; td.title = title;
+                  tr.appendChild(td);
+              });
+              frag.appendChild(tr);
+          }
+          
+          tbody.appendChild(frag);
+          currentIndex += BATCH_SIZE;
+
+          if (currentIndex < users.length) {
+              setTimeout(processBatch, 0);
+          } else {
+              renderCapacityRow(daysInYear, dailyCounts, deptRules);
+              updateMonthlyTotals(daysInYear, dailyCounts);
+              document.getElementById('global-loader').style.display = 'none';
+          }
+      }
+
+      processBatch();
+    }
+
+    function updateMonthlyTotals(daysInYear, dailyCounts) {
+        // Aggregator: month index -> total
+        const monthlySums = {}; 
+        
+        daysInYear.forEach(d => {
+            if (!monthlySums[d.month]) monthlySums[d.month] = 0;
+            monthlySums[d.month] += (dailyCounts[d.iso] || 0);
+        });
+
+for (let m = 0; m < 12; m++) {
+    const el = document.getElementById(`month-total-${m}`);
+    if (el) {
+        const total = parseFloat((monthlySums[m] || 0).toFixed(1)); // Safely keep the .5
+        el.textContent = total;
+    }
+}
+    }
+
+    function renderCapacityRow(daysInYear, dailyCounts, deptRules) {
+        // If multiple depts selected or groups, treat as Group View
+        const isGroupView = SELECTED_DEPTS.length > 1 || SELECTED_DEPTS[0] === 'All' || SELECTED_DEPTS[0].includes('Group') || SELECTED_DEPTS[0].includes('Transport_') || SELECTED_DEPTS[0].includes('Compliance');
+        const DB_KEYS = ["Sun_Cap", "Mon_Cap", "Tue_Cap", "Wed_Cap", "Thu_Cap", "Fri_Cap", "Sat_Cap"];
+
+        daysInYear.forEach(day => {
+            const iso = day.iso;
+            const dw = day.dayOfWeek; 
+            const cell = document.getElementById(`cap-${iso}`);
+
+            if (cell) {
+                const count = dailyCounts[iso] || 0;
+                cell.className = ''; cell.style.cssText = ''; cell.style.textAlign = "center"; cell.style.fontSize = "11px";
+
+                if (isGroupView) {
+                    cell.textContent = count;
+                    cell.style.color = "#999"; 
+                } 
+                else {
+                    let limit = null;
+                    if (deptRules) {
+                        if (deptRules[iso] !== undefined) limit = deptRules[iso];
+                        else if (deptRules[dw] !== undefined) limit = deptRules[dw];
+                        else if (deptRules[String(dw)] !== undefined) limit = deptRules[String(dw)];
+                        else if (deptRules[DB_KEYS[dw]] !== undefined) limit = deptRules[DB_KEYS[dw]];
+                    }
+                    if (limit === null) limit = 2;
+                    
+                    cell.textContent = `${count}/${limit}`;
+                    const isFull = count >= limit;
+                    const isClosedZero = (limit === 0 && count === 0);
+                    if (isFull && !isClosedZero) {
+                        cell.className = 'header-cap-full';
+                    } else if (count >= (limit - 1) && limit > 2) {
+                        cell.style.backgroundColor = '#fff3e0'; cell.style.color = '#e65100'; cell.style.fontWeight = 'bold';
+                    } else {
+                        cell.style.color = "#666";
+                    }
+                }
+            }
+        });
+    }
+
+    // --- OTHER UI FUNCTIONS ---
+    function setupUserSelector() {
+        const users = getUsersByDept(SELECTED_DEPTS);
+        const sel = document.getElementById('userSelector');
+        sel.innerHTML = '';
+        if (users.length === 0) {
+            const opt = document.createElement('option');
+            opt.textContent = "No colleagues found"; sel.appendChild(opt);
+            document.getElementById('individualCalendarGrid').innerHTML = ''; return;
+        }
+        users.forEach(u => {
+            const opt = document.createElement('option'); opt.value = u.payroll; opt.textContent = u.name; sel.appendChild(opt);
+        });
+        renderIndividualCalendar();
+        document.getElementById('global-loader').style.display = 'none';
+    }
+
+    function renderIndividualCalendar() {
+        const payroll = document.getElementById('userSelector').value;
+        const year = parseInt(document.getElementById('yearFilter').value);
+        const container = document.getElementById('individualCalendarGrid');
+        container.innerHTML = '';
+        
+        const user = DATA.users.find(u => String(u.payroll) === String(payroll));
+        if(!user) return;
+
+        const userEvents = FAST_MAP.events[String(payroll)] || {};
+        const userRequests = FAST_MAP.requests[String(payroll)] || {};
+        for (let m = 0; m < 12; m++) {
+            const div = document.createElement('div');
+            div.className = 'month-card';
+            const title = document.createElement('div'); title.className = 'month-title';
+            title.textContent = new Date(year, m, 1).toLocaleString('default', { month: 'long' });
+            div.appendChild(title);
+            const cal = document.createElement('div'); div.appendChild(cal); container.appendChild(div);
+
+            flatpickr(cal, {
+                inline: true, minDate: new Date(year, m, 1), maxDate: new Date(year, m+1, 0), defaultDate: new Date(year, m, 1), 
+                locale: { firstDayOfWeek: 0 }, disable: [()=>true], 
+                
+                onDayCreate: (d,s,f,e) => {
+                    if (e.dateObj.getMonth() !== m) { e.style.visibility = 'hidden'; return; }
+                    const iso = getSafeLocalISO(e.dateObj); 
+                    
+                    // Pass the user.xmasGroup here
+                    const isWork = isWorkingDay(e.dateObj, user.pattern, user.dept, user.xmasGroup);
+                    const dbEv = userEvents[iso];
+                    const req = userRequests[iso];
+
+                    if (dbEv) {
+                        const code = dbEv.code;
+                        e.title = TOOLTIPS[code] || code; e.textContent = code;
+                        if (['SP','SSP','SHP','UPS','PSS','UA'].includes(code)) {
+                            e.style.background = "linear-gradient(135deg, #dd052a, #ff2e52)"; e.style.color = "white"; e.style.borderColor = "#dd052a";
+                        } else if (['ML','PL','BL','CL','PRL'].includes(code)) {
+                            e.style.background = "linear-gradient(135deg, #009ee3, #33bdf2)"; e.style.color = "white"; e.style.borderColor = "#009ee3";
+                        } else if (code === 'H') {
+                            e.style.background = "linear-gradient(135deg, #92bc20, #a8d12d)"; e.style.color = "white"; e.style.borderColor = "#7a9c1b";
+                        } else if (['HD', 'HD1', 'HD2'].includes(code)) {
+                            e.style.background = "linear-gradient(135deg, #ff9800, #ffb74d)"; e.style.color = "black"; e.style.borderColor = "#e68900";
+                        } else if (code === 'PA') {
+                            e.style.background = "linear-gradient(135deg, #9c27b0, #d05ce3)"; e.style.color = "white"; e.style.borderColor = "#9c27b0";
+                        } else {
+                            e.style.background = "linear-gradient(135deg, #333333, #555555)"; e.style.color = "white";
+                        }
+                    } 
+                    else if (req) {
+                         if (req.status === 'Pending') {
+                            e.style.background = "linear-gradient(135deg, #ffdd00, #ffea4d)"; e.style.color = "black"; e.title = "Pending";
+                         }
+                         else if (req.status && req.status.includes('Rejected')) {
+                            e.style.background = "linear-gradient(135deg, #555555, #777777)"; e.style.color = "#ff9999"; e.style.textDecoration = "line-through";
+                            e.style.fontWeight = "bold"; e.title = req.status;
+                         }
+                    }
+                    else if (!isWork) {
+                        e.classList.add('flatpickr-day', 'weekend-date'); 
+                        e.style.background = "#eee"; e.style.color = "#888"; e.style.borderColor = "transparent";
+                    }
+                }
+            });
+        }
+    }
+
+    // FIX: Add xmasGroupOverride to the parameters
+    function isWorkingDay(date, patternCode, dept, explicitXGroup) {
+    const m = date.getMonth();
+    const day = date.getDate();
+    const year = date.getFullYear();
+
+    const isFestiveWindow = (m === 11 && day >= 20) || (m === 0 && day <= 4);
+
+    if (isFestiveWindow && DATA.exceptions) {
+        let rotaYear = year;
+        if (m === 0 && day <= 4) rotaYear = year - 1;
+
+        let xmasGroup = explicitXGroup || "";
+
+        if (!xmasGroup && DATA.statutory) {
+            const cleanDept = String(dept || "").trim().toLowerCase();
+            const keysToTry = [`${cleanDept}_${rotaYear}`, `${cleanDept}_${year}`, `${cleanDept}_${new Date().getFullYear()}`];
+            for (let k of keysToTry) {
+                if (DATA.statutory[k] && DATA.statutory[k].xmasGroup) {
+                    xmasGroup = DATA.statutory[k].xmasGroup;
+                    break;
+                }
+            }
+        }
+
+        if (xmasGroup) {
+            const iso = getSafeLocalISO(date);
+            let exceptionResult = undefined;
+            const strictKey = `${rotaYear}_${xmasGroup}`;
+
+            if (DATA.exceptions[strictKey] && DATA.exceptions[strictKey][iso] !== undefined) {
+                exceptionResult = DATA.exceptions[strictKey][iso];
+            } else {
+                for (let key in DATA.exceptions) {
+                    if (key.endsWith(`_${xmasGroup}`) && DATA.exceptions[key][iso] !== undefined) {
+                        exceptionResult = DATA.exceptions[key][iso];
+                        break;
+                    }
+                }
+            }
+            if (exceptionResult !== undefined) return exceptionResult;
+        }
+    }
+
+    const pCode = patternCode || (DATA.viewer ? DATA.viewer.pattern : null);
+    if (!DATA.patterns || !DATA.patterns[pCode]) { 
+        const d = date.getDay();
+        return d !== 0 && d !== 6; 
+    } 
+    
+    const d = new Date(date);
+    const utcDate = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+    const utcEpoch = Date.UTC(2024, 11, 29, 12, 0, 0, 0);
+    const diffMs = utcDate - utcEpoch;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const cycleLength = DATA.patterns[pCode].cycleLength;
+    const weekIndex = Math.floor(diffDays / 7) % cycleLength;
+    const normalizedIndex = weekIndex >= 0 ? weekIndex : weekIndex + cycleLength;
+    const weekDays = DATA.patterns[pCode].weeks[normalizedIndex];
+    return weekDays && weekDays.includes(d.toLocaleDateString('en-GB', {weekday: 'short'}));
+}
+
+    function getUsersByDept(selectedArray) {
+        const stockComplianceTeams = ["QC AM", "QC PM", "PI AM", "PI PM 1", "PI PM 2", "PI NT", "Stop & Check AM", "Stop & Check PM", "Stop & Check NT", "NLL AM", "Compliance Analyst", "QC/PI", "Continuous Improvement"];
+        
+        // NEW SPLIT SHUNTERS
+        const transDrivers = [
+            "Transport AM", "Transport PM", "Transport NT", 
+            "Transport Shunter AM1", "Transport Shunter AM2", 
+            "Transport Shunter PM1", "Transport Shunter PM2", "Transport Shunter PM3", 
+            "Transport Shunter NT1", "Transport Shunter NT2"
+        ];
+        
+        const transAdmin = ["Transport Trainer AM", "Transport Trainer PM", "Transport Admin Group 1", "Transport Admin Group 2", "Transport Admin Group 3", "Transport Admin Group 4", "Transport Line Manager AM", "Transport Line Manager PM", "Transport Line Manager NT"];
+        
+        // NEW SORT ORDER
+        const transportPriority = { 
+            "Transport Shunter AM1": 1, "Transport Shunter AM2": 2, "Transport AM": 3, 
+            "Transport Shunter PM1": 4, "Transport Shunter PM2": 5, "Transport Shunter PM3": 6, "Transport PM": 7, 
+            "Transport Shunter NT1": 8, "Transport Shunter NT2": 9, "Transport NT": 10 
+        };
+
+        // 1. FILTERING
+        let filteredUsers = DATA.users.filter(u => {
+            if (selectedArray.includes('All')) return true;
+            
+            // Check if user belongs to ANY of the selected groups/depts
+            return selectedArray.some(sel => {
+                if (sel === 'Stock Compliance') return stockComplianceTeams.includes(u.dept); 
+                if (sel === 'Group_AM') return u.dept && u.dept.endsWith(" AM"); 
+                if (sel === 'Group_PM') return u.dept && u.dept.endsWith(" PM"); 
+                if (sel === 'Group_NT') return u.dept && u.dept.endsWith(" NT"); 
+                if (sel === 'Group_OpsMgr') return u.dept && u.dept.toLowerCase().includes("ops manager");
+                if (sel === 'Transport_Drivers') return transDrivers.includes(u.dept); 
+                if (sel === 'Transport_Admin') return transAdmin.includes(u.dept);
+                return u.dept === sel; 
+            });
+        });
+
+        // 2. SORTING
+        return filteredUsers.sort((a, b) => {
+            const priorityA = transportPriority[a.dept] || 999;
+            const priorityB = transportPriority[b.dept] || 999;
+            if (priorityA !== priorityB) return priorityA - priorityB;
+            if (a.dept !== b.dept) return a.dept.localeCompare(b.dept);
+            return a.name.localeCompare(b.name);
+        });
+    }
+
+    function refreshData() {
+    // 1. Show the global loading screen
+    document.getElementById('global-loader').style.display = 'flex';
+    
+    // 2. Get the currently selected year from the dropdown
+    const selectedYear = document.getElementById('yearFilter').value;
+    
+    // 3. Fetch new data from the backend
+    google.script.run
+        .withSuccessHandler((json) => {
+
+            init(JSON.parse(json));
+        })
+        .withFailureHandler((err) => {
+            console.error("Refresh failed:", err);
+            document.getElementById('global-loader').style.display = 'none';
+            alert("Failed to refresh data. Please try again.");
+        })
+        .getTrackerData(selectedYear);
+}
+  </script>
+</body>
+</html>
