@@ -1,0 +1,568 @@
+// ============================================================================================================================================================================
+//  WICKES ALLOWANCE & CALCULATION ENGINE (PRODUCTION v17 - SPLIT LOGIC)
+//  - Base Days: 23
+//  - Base Tier: Uses 'Effective Years' (Service - 1 until anniversary)
+//  - Milestones: Uses 'Calendar Years' (Strict 15/20/25 check)
+//  - Fixes: Stops "Year 16" employees getting the "Year 15" bonus early in the year.
+// ============================================================================================================================================================================
+
+// --- 1. CONFIGURATION ---
+
+const ALLOWANCE_CONFIG = {
+  FULL_TIME_DAYS: 5,  
+  BASE_DAYS: 23,      // Standard Base
+  YEARS_3_DAYS: 24,   // 3+ Years Base
+  YEARS_5_DAYS: 25,   // 5+ Years Base
+  MILESTONE_BONUS: 1, 
+  PARENTAL_ADD: 5     
+};
+
+// --- CONTRACT EXCEPTIONS ---
+const CONTRACT_EXCEPTIONS = {
+  '500001': 27,
+  '500536': 27,
+  '500004': 27,
+  '500344': 28,
+  '500379': 27
+  // Add others here
+};
+
+// COLUMN MAPPING
+const COL_CY_TOTAL = 7;   // Col G
+const COL_CY_REM = 9;     // Col I
+const COL_NY_TOTAL = 10;  // Col J
+const COL_NY_REM = 12;    // Col L
+const COL_DAYS_WEEK = 21; // Col U
+const COL_STAT_DAYS = 22; // Col V
+
+const MASTER_LIST_ID = '1m5WIlHkblKf0TVtMIm0k_HpScK87QAwyZYkHYx7SHR8';
+const TARGET_DB_ID = '1wLTDovDcceXdVEK4H0R-2L4OkrAgW8f61pKYYWIPCA4';
+
+// --- MAIN UPDATER (Now ran every hour)
+function runAllowanceUpdate() {
+  console.time("Engine Runtime");
+  console.log("Starting Daily Sync & Calculation Engine...");
+  let ss, masterSS;
+  try {
+    ss = SpreadsheetApp.openById(TARGET_DB_ID);
+    masterSS = SpreadsheetApp.openById(MASTER_LIST_ID);
+  } catch (e) { console.error("Critical Error: Check Sheet IDs."); return; }
+
+  const uSheet = ss.getSheetByName("Users");
+  const auditSheet = ss.getSheetByName("Audit_Adjustments");
+  const dbSheet = ss.getSheetByName("Approved"); 
+  const masterSheet = masterSS.getSheetByName("LIST") || masterSS.getSheets()[0];
+
+  if (!uSheet || !auditSheet || !masterSheet || !dbSheet) return;
+  // 2. Pre-Load Data
+  const allAdjustments = getAllAuditAdjustments(auditSheet);
+  const liveDaysMap = getLiveDaysPerWeek(masterSheet);
+  const bookedMap = calculateBookedFromDB(dbSheet);
+  const uData = uSheet.getDataRange().getValues();
+  console.log(`Processing ${uData.length - 1} rows...`);
+
+  // 3. Time Constants
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const nextYear = currentYear + 1;
+  const nyReleaseDate = new Date(currentYear, 0, 1);
+  const isNYReleased = today >= nyReleaseDate;
+
+  // Pre-Calc Holidays
+  const holListCY = [...getVariableBankHolidays(currentYear), ...getFixedStatutoryDays(currentYear)].map(d => d.getTime());
+  const holListNY = [...getVariableBankHolidays(nextYear), ...getFixedStatutoryDays(nextYear)].map(d => d.getTime());
+
+  const updates = { 
+    cyTotal: [], cyRem: [], cyBooked: [],
+    nyTotal: [], nyRem: [], nyBooked: [], 
+    days: [], statDays: []
+  };
+  
+  // 4. Main User Loop
+  for (let i = 1; i < uData.length; i++) {
+    const row = uData[i];
+    const payroll = String(row[0]);
+
+    if (!payroll || payroll === "" || payroll === "undefined") {
+        updates.days.push([""]);
+        updates.statDays.push([""]);
+        updates.cyTotal.push([""]); updates.cyBooked.push([""]); updates.cyRem.push([""]);
+        updates.nyTotal.push([""]); updates.nyRem.push([""]);
+        continue;
+    }
+
+    // --- UPDATED: STRICT MASTER LIST SYNC FOR DAYS PER WEEK ---
+    // Always pulls directly from the HR Master List. Only defaults to 5 if 
+    // the user is entirely missing from the master sheet or has invalid data.
+    const masterDays = liveDaysMap[payroll];
+    const liveDays = (masterDays !== undefined && !isNaN(masterDays) && masterDays > 0) 
+                     ? Number(masterDays) 
+                     : 5;
+    // ----------------------------------------------------------
+    
+    // Date Parser
+    const rawStart = row[14];
+    const cleanStartDate = parseDateSafe(rawStart);
+    const startDateForEngine = cleanStartDate ? cleanStartDate.toISOString() : null;
+    const rawChangeDate = row[26];
+    const cleanChangeDate = parseDateSafe(rawChangeDate);
+    const user = {
+        payroll: payroll,
+        daysPerWeek: liveDays,
+        startDateStr: startDateForEngine,
+        plEndDateStr: row[18],
+        role: String(row[3]).trim(),
+        hoursChangeStr: cleanChangeDate ? cleanChangeDate.toISOString() : null
+    };
+    
+    // A. STATUTORY
+    let statEntitlementCY = getStatutoryEntitlement(cleanStartDate, currentYear);
+    let statEntitlementNY = getStatutoryEntitlement(cleanStartDate, nextYear);
+    
+    // --- NEW: RESPECT MANUAL OVERRIDES ---
+    const overrideCY = row[22];
+    const overrideNY = row[23];
+    if (overrideCY !== "" && overrideCY !== undefined && !isNaN(overrideCY)) {
+        statEntitlementCY = Number(overrideCY);
+    }
+    if (overrideNY !== "" && overrideNY !== undefined && !isNaN(overrideNY)) {
+        statEntitlementNY = Number(overrideNY);
+    }
+
+    // --- NEW: GRAB CHRISTMAS RESERVES SAFELY ---
+    // This looks at Column Q (Index 16) and Column R (Index 17).
+    const reserveCY = Number(row[16]) || 0;
+    const reserveNY = Number(row[17]) || 0;
+    
+    // B. CY CALCULATION
+    const detailsCY = getAllowanceDetailsFast(user, currentYear, allAdjustments, today, holListCY);
+    const dbBookedCY = (bookedMap[payroll] && bookedMap[payroll][currentYear]) || 0;
+    
+    // BUG FIX: Now subtracting reserveCY from the total
+    const remainingCY = detailsCY.total - (dbBookedCY + statEntitlementCY + reserveCY);
+    
+    // C. NY CALCULATION
+    let detailsNY = { total: 0 };
+    let bookedNY = 0;
+    let remainingNY = 0;
+
+    if (isNYReleased) {
+        const simDateNY = new Date(nextYear, 0, 1);
+        detailsNY = getAllowanceDetailsFast(user, nextYear, allAdjustments, simDateNY, holListNY);
+        bookedNY = (bookedMap[payroll] && bookedMap[payroll][nextYear]) || 0;
+        // BUG FIX: Now subtracting reserveNY from the total
+        remainingNY = detailsNY.total - (bookedNY + statEntitlementNY + reserveNY);
+    }
+
+    // Push to Arrays
+    updates.days.push([liveDays]);
+    updates.statDays.push([statEntitlementCY]);
+    updates.cyTotal.push([detailsCY.total]);
+    updates.cyBooked.push([dbBookedCY]); 
+    updates.cyRem.push([remainingCY]);
+    updates.nyTotal.push([detailsNY.total]);
+    updates.nyBooked.push([bookedNY]);
+    updates.nyRem.push([remainingNY]);
+  }
+
+  // 5. Batch Write
+  if (updates.days.length > 0) {
+      uSheet.getRange(2, COL_DAYS_WEEK, updates.days.length, 1).setValues(updates.days);
+      uSheet.getRange(2, COL_STAT_DAYS, updates.statDays.length, 1).setValues(updates.statDays);
+      uSheet.getRange(2, COL_CY_TOTAL, updates.cyTotal.length, 1).setValues(updates.cyTotal);
+      uSheet.getRange(2, 8, updates.cyBooked.length, 1).setValues(updates.cyBooked); 
+      uSheet.getRange(2, COL_CY_REM, updates.cyRem.length, 1).setValues(updates.cyRem);
+      uSheet.getRange(2, COL_NY_TOTAL, updates.nyTotal.length, 1).setValues(updates.nyTotal);
+      uSheet.getRange(2, 11, updates.nyBooked.length, 1).setValues(updates.nyBooked);
+      uSheet.getRange(2, COL_NY_REM, updates.nyRem.length, 1).setValues(updates.nyRem);
+  }
+
+  console.timeEnd("Engine Runtime");
+  console.log(`Updated ${updates.days.length} users.`);
+}
+// =========================================================
+// --- CALCULATION ENGINES (SPLIT LOGIC) ---
+// =========================================================
+
+// --- 1. TURBO ENGINE (Nightly Job) ---
+function getAllowanceDetailsFast(user, targetYear, allAdjustments, referenceDate, holTimestamps) {
+    if (!user.payroll || user.daysPerWeek === 0 || !user.startDateStr) {
+        return { total: 0 };
+    }
+    
+    const startDate = new Date(user.startDateStr);
+    
+    let effectiveYears = targetYear - startDate.getFullYear();
+    const annivDate = new Date(targetYear, startDate.getMonth(), startDate.getDate());
+    
+    if (referenceDate < annivDate) {
+        effectiveYears -= 1;
+    }
+    if (effectiveYears < 0) effectiveYears = 0;
+
+    const calendarYears = targetYear - startDate.getFullYear();
+
+    const HIGH_TIER_ROLES = ['M1', 'M2', 'M3', 'AdminManager'];
+    let base;
+
+    if (CONTRACT_EXCEPTIONS[String(user.payroll)]) {
+        base = CONTRACT_EXCEPTIONS[String(user.payroll)];
+    } 
+    else if (HIGH_TIER_ROLES.includes(user.role)) {
+        if (effectiveYears >= 15) base = 27;
+        else if (effectiveYears >= 10) base = 26;
+        else base = 25;
+    } else {
+        if (effectiveYears >= 5) base = ALLOWANCE_CONFIG.YEARS_5_DAYS;
+        else if (effectiveYears >= 3) base = ALLOWANCE_CONFIG.YEARS_3_DAYS;
+        else base = ALLOWANCE_CONFIG.BASE_DAYS;
+    }
+
+    let milestone = 0;
+    if (calendarYears >= 15 && calendarYears % 5 === 0) {
+        if (referenceDate >= annivDate) {
+            milestone = ALLOWANCE_CONFIG.MILESTONE_BONUS;
+        }
+    }
+
+    let parental = 0;
+    if (user.plEndDateStr) {
+        const plEnd = new Date(user.plEndDateStr);
+        if (!isNaN(plEnd.getTime())) {
+            const plYear = plEnd.getFullYear();
+            const plMonth = plEnd.getMonth();
+            if (plMonth <= 5 && (targetYear === plYear || targetYear === plYear + 1)) parental = ALLOWANCE_CONFIG.PARENTAL_ADD;
+            else if (plMonth > 5 && (targetYear === plYear + 1 || targetYear === plYear + 2)) parental = ALLOWANCE_CONFIG.PARENTAL_ADD;
+        }
+    }
+
+    const standardBankHolidays = 5;
+    const standardStatutory = 3;
+
+    const fteTotal = base + milestone + parental + standardBankHolidays + standardStatutory;
+
+    const startOfYear = new Date(targetYear, 0, 1);
+    const endOfYear = new Date(targetYear, 11, 31);
+    const daysInYear = (endOfYear - startOfYear) / 86400000 + 1;
+    
+    let relevantDays = (startDate > startOfYear) ? (endOfYear - startDate) / 86400000 + 1 : daysInYear;
+    if (relevantDays < 0) relevantDays = 0;
+    
+    const rawProRata = (relevantDays / daysInYear) * fteTotal;
+    const timeProRataTotal = Math.round(rawProRata);
+
+    let proRataEntitlement = 0;
+
+    if (user.hoursChangeStr) {
+        const changeDate = new Date(user.hoursChangeStr);
+        
+        if (changeDate.getFullYear() === targetYear) {
+            const daysBefore = (changeDate - startOfYear) / 86400000;
+            const weeksBefore = daysBefore / 7;
+            const weeksAfter = 52 - weeksBefore;
+            
+            const prevDays = 5; 
+            
+            const period1 = (timeProRataTotal * (prevDays / 5)) * (weeksBefore / 52);
+            const period2 = (timeProRataTotal * (user.daysPerWeek / 5)) * (weeksAfter / 52);
+            
+            proRataEntitlement = period1 + period2;
+        } else {
+            proRataEntitlement = (timeProRataTotal / 5) * user.daysPerWeek;
+        }
+    } else {
+        proRataEntitlement = (timeProRataTotal / 5) * user.daysPerWeek;
+    }
+
+    let bought = 0;
+    let adjusted = 0;
+    const userAdjs = allAdjustments.filter(a => String(a.payroll) === String(user.payroll) && Number(a.year) === Number(targetYear));
+    userAdjs.forEach(a => {
+        const r = a.reason ? a.reason.toLowerCase() : "";
+        if (r.includes('buy') || r.includes('bought')) bought += a.val;
+        else adjusted += a.val;
+    });
+
+    return { total: Math.round(proRataEntitlement) + bought + adjusted };
+}
+
+
+// --- 2. DETAILED ENGINE (Frontend Breakdown) ---
+function getAllowanceDetailsDetailed(user, targetYear, allAdjustments, referenceDate) {
+    if (!user.payroll || user.daysPerWeek === 0 || !user.startDateStr) {
+        return { total: 0, breakdown: {} };
+    }
+    const startDate = new Date(user.startDateStr);
+    
+    let effectiveYears = targetYear - startDate.getFullYear();
+    const annivDate = new Date(targetYear, startDate.getMonth(), startDate.getDate());
+    
+    if (referenceDate < annivDate) {
+        effectiveYears -= 1;
+    }
+    if (effectiveYears < 0) effectiveYears = 0;
+
+    const calendarYears = targetYear - startDate.getFullYear();
+
+    const HIGH_TIER_ROLES = ['M1', 'M2', 'M3', 'AdminManager'];
+    let base;
+
+    if (CONTRACT_EXCEPTIONS[String(user.payroll)]) {
+        base = CONTRACT_EXCEPTIONS[String(user.payroll)];
+    } 
+    else if (HIGH_TIER_ROLES.includes(user.role)) {
+        if (effectiveYears >= 15) base = 27;
+        else if (effectiveYears >= 10) base = 26;
+        else base = 25;
+    } else {
+        if (effectiveYears >= 5) base = ALLOWANCE_CONFIG.YEARS_5_DAYS;
+        else if (effectiveYears >= 3) base = ALLOWANCE_CONFIG.YEARS_3_DAYS;
+        else base = ALLOWANCE_CONFIG.BASE_DAYS;
+    }
+
+    let milestone = 0;
+    if (calendarYears >= 15 && calendarYears % 5 === 0) {
+        if (referenceDate >= annivDate) {
+            milestone = ALLOWANCE_CONFIG.MILESTONE_BONUS;
+        }
+    }
+
+    let parental = 0;
+    if (user.plEndDateStr) {
+        const plEnd = new Date(user.plEndDateStr);
+        if (!isNaN(plEnd.getTime())) {
+            const plYear = plEnd.getFullYear();
+            const plMonth = plEnd.getMonth();
+            if (plMonth <= 5 && (targetYear === plYear || targetYear === plYear + 1)) parental = ALLOWANCE_CONFIG.PARENTAL_ADD;
+            else if (plMonth > 5 && (targetYear === plYear + 1 || targetYear === plYear + 2)) parental = ALLOWANCE_CONFIG.PARENTAL_ADD;
+        }
+    }
+
+    const standardBankHolidays = 5;
+    const standardStatutory = 3;
+
+    const fteTotal = base + milestone + parental + standardBankHolidays + standardStatutory;
+
+    const startOfYear = new Date(targetYear, 0, 1);
+    const endOfYear = new Date(targetYear, 11, 31);
+    const daysInYear = (endOfYear - startOfYear) / 86400000 + 1;
+    
+    let relevantDays = (startDate > startOfYear) ? (endOfYear - startDate) / 86400000 + 1 : daysInYear;
+    if (relevantDays < 0) relevantDays = 0;
+    
+    const rawProRata = (relevantDays / daysInYear) * fteTotal;
+    const timeProRataTotal = Math.round(rawProRata);
+
+    let proRataEntitlement = 0;
+
+    if (user.hoursChangeStr) {
+        const changeDate = new Date(user.hoursChangeStr);
+        
+        if (changeDate.getFullYear() === targetYear) {
+            const daysBefore = (changeDate - startOfYear) / 86400000;
+            const weeksBefore = daysBefore / 7;
+            const weeksAfter = 52 - weeksBefore;
+            
+            const prevDays = 5; 
+            
+            const period1 = (timeProRataTotal * (prevDays / 5)) * (weeksBefore / 52);
+            const period2 = (timeProRataTotal * (user.daysPerWeek / 5)) * (weeksAfter / 52);
+            
+            proRataEntitlement = period1 + period2;
+        } else {
+            proRataEntitlement = (timeProRataTotal / 5) * user.daysPerWeek;
+        }
+    } else {
+        proRataEntitlement = (timeProRataTotal / 5) * user.daysPerWeek;
+    }
+
+    const userAdjs = allAdjustments.filter(a => String(a.payroll) === String(user.payroll) && Number(a.year) === Number(targetYear));
+    let bought = 0;
+    let adjusted = 0;
+    userAdjs.forEach(a => {
+        const r = a.reason ? a.reason.toLowerCase() : "";
+        if (r.includes('buy') || r.includes('bought')) bought += a.val;
+        else adjusted += a.val;
+    });
+
+    const finalTotal = Math.round(proRataEntitlement) + bought + adjusted;
+
+    return {
+        total: finalTotal,
+        breakdown: {
+            base: base,
+            variableBH: standardBankHolidays, 
+            fixedBH: standardStatutory,       
+            milestone: milestone,
+            parental: parental,
+            bought: bought,
+            adjusted: adjusted,
+            daysPerWeek: user.daysPerWeek,
+            fteTotal: fteTotal,
+            proRataEntitlement: Math.round(proRataEntitlement)
+        }
+    };
+}
+
+// --- PUBLIC API FOR FRONTEND BREAKDOWN ---
+function getMyAllowanceBreakdown() {
+    const userEmail = Session.getActiveUser().getEmail();
+    const ss = SpreadsheetApp.openById(TARGET_DB_ID);
+    const uSheet = ss.getSheetByName("Users");
+    const uData = uSheet.getDataRange().getValues();
+    
+    const uRow = uData.find(r => String(r[2]).toLowerCase() === userEmail.toLowerCase());
+    if (!uRow) return { success: false };
+
+    const safeStart = parseDateSafe(uRow[14]); 
+
+    const user = {
+        payroll: uRow[0],
+        daysPerWeek: uRow[20], 
+        startDateStr: safeStart ? safeStart.toISOString() : null,
+        plEndDateStr: uRow[18],
+        role: String(uRow[3]).trim()
+    };
+
+    const auditSheet = ss.getSheetByName("Audit_Adjustments");
+    const allAdjustments = getAllAuditAdjustments(auditSheet);
+    
+    // Use DETAILED calculation
+    const cyData = getAllowanceDetailsDetailed(user, new Date().getFullYear(), allAdjustments, new Date());
+    return { success: true, data: cyData.breakdown };
+}
+
+// =========================================================
+// --- HELPERS ---
+// =========================================================
+
+function calculateBookedFromDB(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const map = {}; 
+  const dayCols = [5,6,7,8,9,10,11]; 
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const payroll = String(row[1]);
+    const wc = row[4]; 
+
+    if (wc instanceof Date) {
+       const year = wc.getFullYear(); 
+       if (!map[payroll]) map[payroll] = {};
+       if (!map[payroll][year]) map[payroll][year] = 0;
+
+       dayCols.forEach((colIdx, dIdx) => {
+          const val = row[colIdx];
+          const actualDate = new Date(wc);
+          actualDate.setDate(wc.getDate() + dIdx);
+          const actualYear = actualDate.getFullYear();
+
+          if (!map[payroll][actualYear]) map[payroll][actualYear] = 0;
+
+          if (val === 'H') map[payroll][actualYear] += 1;
+          if (val === 'HD' || val === 'HD1' || val === 'HD2') map[payroll][actualYear] += 0.5;
+       });
+    }
+  }
+  return map;
+}
+
+function getStatutoryEntitlement(startDateInput, year) {
+    if (!startDateInput) return 0;
+    const startDate = (startDateInput instanceof Date) ? startDateInput : new Date(startDateInput);
+    if (isNaN(startDate.getTime())) return 0;
+
+    const statDates = [
+        new Date(year, 0, 1),   
+        new Date(year, 11, 25), 
+        new Date(year, 11, 26)  
+    ];
+    let count = 0;
+    statDates.forEach(d => { if (startDate <= d) count++; });
+    return count;
+}
+
+function parseDateSafe(input) {
+    if (!input) return null;
+    if (input instanceof Date) return input; 
+    
+    if (typeof input === 'string') {
+        if (input.includes('/')) {
+            const parts = input.split('/');
+            if (parts.length === 3) {
+                return new Date(parts[2], parts[1] - 1, parts[0]); 
+            }
+        }
+    }
+    const d = new Date(input);
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function getLiveDaysPerWeek(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const map = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0]) map[String(data[i][0])] = data[i][5];
+  }
+  return map;
+}
+
+function getAllAuditAdjustments(sheet) {
+    const data = sheet.getDataRange().getValues();
+    const result = [];
+    for (let i = 1; i < data.length; i++) {
+        const p = String(data[i][2]);
+        const y = Number(data[i][3]);
+        const v = Number(data[i][4]);
+        const r = String(data[i][5]);
+        if (p && !isNaN(y) && !isNaN(v)) result.push({ payroll: p, year: y, val: v, reason: r });
+    }
+    return result;
+}
+
+function getVariableBankHolidays(year) {
+    const dates = [];
+    const easter = getEasterSunday(year);
+    const goodFri = new Date(easter); goodFri.setDate(easter.getDate() - 2);
+    const easterMon = new Date(easter); easterMon.setDate(easter.getDate() + 1);
+    dates.push(goodFri, easterMon);
+    dates.push(getNthWeekdayOfMonth(year, 4, 1, 1)); 
+    dates.push(getLastWeekdayOfMonth(year, 4, 1));   
+    dates.push(getLastWeekdayOfMonth(year, 7, 1));   
+    return dates;
+}
+
+function getFixedStatutoryDays(year) {
+    return [
+        new Date(year, 0, 1),   
+        new Date(year, 11, 25), 
+        new Date(year, 11, 26)  
+    ];
+}
+
+function getEasterSunday(year) {
+    const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), month = Math.floor((h + l - 7 * m + 114) / 31) - 1, day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(year, month, day);
+}
+
+function getNthWeekdayOfMonth(year, month, dayOfWeek, n) {
+    const date = new Date(year, month, 1);
+    let count = 0;
+    while (true) {
+        if (date.getDay() === dayOfWeek) count++;
+        if (count === n) return new Date(date);
+        date.setDate(date.getDate() + 1);
+    }
+}
+
+function getLastWeekdayOfMonth(year, month, dayOfWeek) {
+    const date = new Date(year, month + 1, 0);
+    while (date.getDay() !== dayOfWeek) date.setDate(date.getDate() - 1);
+    return new Date(date);
+}
+
+function getFirstSaturdayJuly(year) {
+    const d = new Date(year, 6, 1); 
+    while (d.getDay() !== 6) d.setDate(d.getDate() + 1);
+    return d;
+}

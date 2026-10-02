@@ -1,0 +1,609 @@
+// ================================================================================================================================================================================================
+// CONFIGURATION
+// ================================================================================================================================================================================================
+// PASTE YOUR PUBLISHED WEB APP URL HERE (The one your team uses)
+const WEB_APP_URL = 'https://script.google.com/a/macros/wickes.co.uk/s/AKfycbzsqTwZyS6O5UAyMaLq2BLk2vkOBezkZk5IkeyIxayp2JOMriSsX2sWTe6u0JVJPQWE/exec'; 
+
+const SPREADSHEET_ID_EMAIL = '1wLTDovDcceXdVEK4H0R-2L4OkrAgW8f61pKYYWIPCA4';
+
+// ================================================================================================================================================================================================
+// MENU TRIGGER
+// ================================================================================================================================================================================================
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('Wickes Admin')
+    .addItem('Send Welcome Email to Selected Rows', 'adminSendWelcomeEmails')
+    .addItem('Send NY Update Emails', 'adminSendNYUpdateEmails')
+    .addItem('Send Half-Day Launch Emails', 'adminSendHalfDayLaunchEmails')
+    .addItem('Generate Usage Report', 'generateUsageReport')
+    .addSeparator() // Adds a line to separate everyday tools from the cleanup tool
+    .addItem('Nuclear Cleanup (Purge Orphaned Data)', 'adminCleanupOrphanedData')
+    .addToUi();
+}
+
+// =================================================================================================================================================================================================
+// USAGE ANALYTICS GENERATOR (EMBEDDED SCRIPT)
+// =================================================================================================================================================================================================
+function generateUsageReport() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); 
+  const sheet = ss.getSheetByName('Users');
+  const data = sheet.getDataRange().getValues();
+  data.shift(); // remove headers
+
+  let reportSheet = ss.getSheetByName('Usage_Analytics');
+  if (!reportSheet) {
+    reportSheet = ss.insertSheet('Usage_Analytics');
+  } else {
+    reportSheet.clear();
+  }
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  // Added "Remaining CY" to headers
+  const reportData = [["Name", "Payroll", "Email", "Department", "Role", "Remaining CY", "Last Login", "Status"]];
+
+  data.forEach(r => {
+    if (r[12] !== 'Active') return; // Only check active staff
+
+    const name = r[1];
+    const payroll = r[0];
+    const email = r[2];
+    const role = r[3];
+    const dept = r[5];
+    const remainingCY = r[8]; // Column I (Index 8)
+    const lastLogin = r[25]; // Column Z
+
+    let status = "Inactive (>30 Days)";
+    let loginStr = "Never";
+
+    if (lastLogin instanceof Date) {
+      loginStr = Utilities.formatDate(lastLogin, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
+      if (lastLogin > thirtyDaysAgo) {
+        status = "Active";
+      }
+    }
+
+    reportData.push([name, payroll, email, dept, role, remainingCY, loginStr, status]);
+  });
+
+  // Sort: Dept -> Status -> Name
+  const headers = reportData.shift();
+  reportData.sort((a, b) => {
+    if (a[3] !== b[3]) return a[3].localeCompare(b[3]);
+    if (a[7] !== b[7]) return a[7].localeCompare(b[7]); // Updated index to 7 to account for the new column
+    return a[0].localeCompare(b[0]);
+  });
+  reportData.unshift(headers);
+
+  // Write to sheet
+  const fullRange = reportSheet.getRange(1, 1, reportData.length, reportData[0].length);
+  fullRange.setValues(reportData);
+  
+  // Format: Set Roboto, Size 9 for the entire populated range
+  fullRange.setFontFamily("Roboto").setFontSize(9);
+
+  // Format Header: Bold, Blue Background, White Text
+  reportSheet.getRange(1, 1, 1, 8).setFontWeight("bold").setBackground("#073763").setFontColor("white");
+  
+  // Resize all 8 columns
+  reportSheet.autoResizeColumns(1, 8);
+
+  SpreadsheetApp.getUi().alert("Usage Report generated successfully! Check the 'Usage_Analytics' tab at the bottom of your screen.");
+}
+
+// ==========================================
+// ADMIN FUNCTIONS
+// ==========================================
+function adminSendWelcomeEmails() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(); 
+  
+  if (sheet.getName() !== 'Users') {
+    ui.alert('Wrong Sheet', 'Please use this on the "Users" sheet.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const selection = sheet.getSelection();
+  const ranges = selection.getActiveRangeList().getRanges();
+  
+  if (!ranges || ranges.length === 0) {
+     ui.alert('Selection Error', 'Please highlight the rows you want to email.', ui.ButtonSet.OK);
+     return;
+  }
+
+  let emailsSent = 0;
+  let errors = 0;
+  const data = sheet.getDataRange().getValues();
+  
+  ranges.forEach(range => {
+    const startRow = range.getRow();
+    const numRows = range.getNumRows();
+    
+    for (let i = 0; i < numRows; i++) {
+      const rowIndex = startRow + i - 1;
+      if (rowIndex < 1) continue; 
+      if (rowIndex >= data.length) continue; 
+
+      const rowData = data[rowIndex];
+      // A=Payroll, B=Name, C=Email
+      const user = { name: rowData[1], email: rowData[2] };
+
+      if (user.email && String(user.email).includes('@')) {
+        try {
+          EmailService.sendWelcomeEmail(user);
+          emailsSent++;
+        } catch (e) {
+          console.error(`Failed: ${e.message}`);
+          errors++;
+        }
+      }
+    }
+  });
+
+  ui.alert(`Sent ${emailsSent} welcome emails. Errors: ${errors}`);
+}
+
+function adminSendHalfDayLaunchEmails() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(); 
+  
+  if (sheet.getName() !== 'Users') {
+    ui.alert('Wrong Sheet', 'Please use this on the "Users" sheet.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const selection = sheet.getSelection();
+  const ranges = selection.getActiveRangeList().getRanges();
+  
+  if (!ranges || ranges.length === 0) {
+     ui.alert('Selection Error', 'Please highlight the rows you want to email.', ui.ButtonSet.OK);
+     return;
+  }
+
+  let emailsSent = 0;
+  let errors = 0;
+  const data = sheet.getDataRange().getValues();
+  
+  ranges.forEach(range => {
+    const startRow = range.getRow();
+    const numRows = range.getNumRows();
+    
+    for (let i = 0; i < numRows; i++) {
+      const rowIndex = startRow + i - 1;
+      if (rowIndex < 1) continue; 
+      if (rowIndex >= data.length) continue; 
+
+      const rowData = data[rowIndex];
+      // This is where it dynamically grabs their specific name and email
+      const user = { name: rowData[1], email: rowData[2] };
+
+      if (user.email && String(user.email).includes('@')) {
+        try {
+          EmailService.sendHalfDayLaunchEmail(user);
+          emailsSent++;
+        } catch (e) {
+          console.error(`Failed: ${e.message}`);
+          errors++;
+        }
+      }
+    }
+  });
+
+  ui.alert(`Sent ${emailsSent} Half-Day launch emails. Errors: ${errors}`);
+}
+
+function adminSendNYUpdateEmails() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(); 
+  
+  if (sheet.getName() !== 'Users') {
+    ui.alert('Wrong Sheet', 'Please use this on the "Users" sheet.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const selection = sheet.getSelection();
+  const ranges = selection.getActiveRangeList().getRanges();
+  
+  if (!ranges || ranges.length === 0) {
+     ui.alert('Selection Error', 'Please highlight the rows you want to email.', ui.ButtonSet.OK);
+     return;
+  }
+
+  let emailsSent = 0;
+  let errors = 0;
+  const data = sheet.getDataRange().getValues();
+  
+  ranges.forEach(range => {
+    const startRow = range.getRow();
+    const numRows = range.getNumRows();
+    
+    for (let i = 0; i < numRows; i++) {
+      const rowIndex = startRow + i - 1;
+      if (rowIndex < 1) continue; 
+      if (rowIndex >= data.length) continue; 
+
+      const rowData = data[rowIndex];
+      const user = { name: rowData[1], email: rowData[2] };
+
+      if (user.email && String(user.email).includes('@')) {
+        try {
+          EmailService.sendNYUpdateEmail(user);
+          emailsSent++;
+        } catch (e) {
+          console.error(`Failed: ${e.message}`);
+          errors++;
+        }
+      }
+    }
+  });
+
+  ui.alert(`Sent ${emailsSent} update emails. Errors: ${errors}`);
+}
+
+// ==========================================
+// EMAIL SERVICE (Simplified for Admin use)
+// ==========================================
+var EmailService = {
+  _send: function(to, subject, htmlBody) {
+    if (!to) return;
+    MailApp.sendEmail({
+      to: to,
+      subject: subject,
+      htmlBody: htmlBody,
+      name: "Wickes Holiday Portal"
+    });
+  },
+
+  sendWelcomeEmail: function(data) {
+    const subject = "Wickes Holiday Portal: Account Created";
+    const html = this._getTemplate_Welcome(data);
+    this._send(data.email, subject, html);
+  },
+
+  sendNYUpdateEmail: function(data) {
+    const subject = "Update: Booking Next Year's Holiday";
+    const html = this._getTemplate_NYUpdate(data);
+    this._send(data.email, subject, html);
+  },
+
+  _getTemplate_Welcome: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Portal Access Information</h2>
+      <p>Hi ${d.name},</p>
+      <p>Your account for the <strong>Wickes Holiday Portal</strong> has been successfully created.</p>
+      <p>You can now log in to manage your holiday allowance and submit requests.</p>
+      <div style="background-color: #f4f4f4; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #ddd;">
+        <p style="margin: 0; font-size: 14px; color: #555;"><strong>Note:</strong>  Please book through the link below and not through the HR Centre</p>
+      </div>
+      <a href="${WEB_APP_URL}" style="display: inline-block; padding: 12px 24px; background: linear-gradient(135deg, #009ee3, #33bdf2); color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; border: 1px solid #009ee3;">Open Holiday Portal</a>
+      <p style="margin-top: 25px; font-size: 14px; color: #666;">If you have any questions, please contact your Line Manager.</p>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  _getTemplate_NYUpdate: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Holiday Portal Update</h2>
+      <p>Hi ${d.name},</p>
+      <p>We are pleased to announce an update to how you can book your future holidays.</p>
+      
+      <div style="background-color: #f4f4f4; border-left: 6px solid #009ee3; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #ddd;">
+        <h3 style="margin-top: 0; color: #073763;">When can I book for Next Year?</h3>
+        <p style="margin-bottom: 8px;"><strong>This Year:</strong> Your Next Year allowance will be unlocked and ready to use from <strong>Saturday, 18 April at 4:00 PM</strong>.</p>
+        <p style="margin: 0;"><strong>Going Forward:</strong> From 2027 onwards, your Next Year allowance will automatically unlock on <strong>January 1st</strong>.</p>
+      </div>
+
+      <p>You can check your balance and submit your requests directly through the portal once the allowance is unlocked.</p>
+
+      <a href="${WEB_APP_URL}" style="display: inline-block; padding: 12px 24px; background: linear-gradient(135deg, #009ee3, #33bdf2); color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; border: 1px solid #009ee3;">Open Holiday Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  // --- ADD THIS UNDER YOUR OTHER SEND FUNCTIONS ---
+  sendHalfDayLaunchEmail: function(data) {
+    const subject = "New Feature: Half-Day Holidays are now Live!";
+    const html = this._getTemplate_HalfDayLaunch(data);
+    this._send(data.email, subject, html);
+  },
+
+  // --- ADD THIS UNDER YOUR OTHER TEMPLATES ---
+  _getTemplate_HalfDayLaunch: function(d) {
+    const body = `
+      <h2 style="color: #073763; margin-top: 0;">Half-Day Holidays are Here!</h2>
+      <p>Hi ${d.name},</p>
+      <p>We are excited to announce that you can now book <strong>Half-Day Holidays</strong> directly through the Wickes Holiday Portal.</p>
+      
+      <div style="background-color: #f4f4f4; border-left: 6px solid #ff9800; padding: 20px; border-radius: 6px; margin: 20px 0; border: 1px solid #ddd;">
+        <h3 style="margin-top: 0; color: #073763;">How it works:</h3>
+        <p style="margin-bottom: 8px;"><strong>1. Select a single date:</strong> Half-days must be booked one day at a time.</p>
+        <p style="margin-bottom: 8px;"><strong>2. Choose your half:</strong> A new option will appear on the booking screen allowing you to select <strong>1st Half</strong> or <strong>2nd Half</strong> of your shift.</p>
+        <p style="margin: 0;"><strong>3. Allowances:</strong> You can book up to a maximum of <strong>4 half-days</strong> per calendar year. Any more will need to be authorised by your Manager. Each half-day deducts exactly 0.5 days from your remaining balance.</p>
+      </div>
+
+      <p>Log in to the portal today to check out the new feature and manage your holiday balance.</p>
+
+      <a href="${WEB_APP_URL}" style="display: inline-block; padding: 12px 24px; background: linear-gradient(135deg, #009ee3, #33bdf2); color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; border: 1px solid #009ee3;">Open Holiday Portal</a>
+    `;
+    return this._wrapHtml(body);
+  },
+
+  _wrapHtml: function(content) {
+    return `
+      <div style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 30px 0; width: 100%;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0;">
+          <div style="background: linear-gradient(135deg, #073763, #0b559b); padding: 25px; text-align: center; border-bottom: 4px solid #009ee3;">
+             <span style="color: #ffffff; font-size: 28px; font-weight: bold;">Wickes</span>
+             <span style="color: #009ee3; font-size: 28px; font-weight: 300; margin-left:5px;">Holiday Portal</span>
+          </div>
+          <div style="padding: 30px; color: #333; line-height: 1.6;">${content}</div>
+          <div style="background-color: #eeeeee; padding: 20px; text-align: center; font-size: 12px; color: #777;">
+            &copy; ${new Date().getFullYear()} Wickes Holiday Portal.
+          </div>
+        </div>
+      </div>
+    `;
+  }
+};
+
+// =======================================================================================
+// HR HALF-YEAR REPORT GENERATOR
+// Calculates holidays actually taken between Jan 1 and a specific cutoff date.
+// =======================================================================================
+function generateHRHalfYearReport() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const appSheet = ss.getSheetByName("Approved");
+  const userSheet = ss.getSheetByName("Users");
+
+  if (!appSheet || !userSheet) {
+    SpreadsheetApp.getUi().alert("Error: Could not find 'Approved' or 'Users' sheet.");
+    return;
+  }
+
+  // 1. Get baseline user data (Payroll, Name, Dept, Total CY Allowance)
+  const userData = userSheet.getDataRange().getValues();
+  const userMap = {};
+  
+  // Skip header row
+  for (let i = 1; i < userData.length; i++) {
+    const payroll = String(userData[i][0]).trim();
+    if (payroll) {
+      userMap[payroll] = {
+        name: userData[i][1],
+        dept: userData[i][5],
+        totalAllowance: Number(userData[i][6]) || 0, // Column G (CY Total)
+        takenBeforeCutoff: 0
+      };
+    }
+  }
+
+  // 2. Set the strict date boundaries
+  const cutoffDate = new Date(2026, 5, 27); // Month is 0-indexed: 5 = June. So, June 27, 2026.
+  const startDate = new Date(2026, 0, 1);   // Jan 1, 2026
+  
+  // 3. Scan the Approved tracker
+  const appData = appSheet.getDataRange().getValues();
+  
+  for (let i = 1; i < appData.length; i++) {
+    const payroll = String(appData[i][1]).trim();
+    const wc = appData[i][4]; // Week Commencing date
+
+    if (wc instanceof Date && userMap[payroll]) {
+      // Loop through Sun(5) to Sat(11)
+      for (let d = 0; d < 7; d++) {
+        const code = String(appData[i][5 + d]).trim().toUpperCase();
+        
+        // If it's a holiday code...
+        if (['H', 'HD', 'HD1', 'HD2'].includes(code)) {
+          // Calculate the exact date for this specific cell
+          const cellDate = new Date(wc.getTime());
+          cellDate.setDate(wc.getDate() + d);
+
+          // Only count it if it falls within the boundaries
+          if (cellDate >= startDate && cellDate <= cutoffDate) {
+            userMap[payroll].takenBeforeCutoff += (code === 'H' ? 1 : 0.5);
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Create and populate the output sheet
+  let outSheet = ss.getSheetByName("HR_Half_Year_Report");
+  if (!outSheet) {
+    outSheet = ss.insertSheet("HR_Half_Year_Report");
+  }
+  outSheet.clear();
+
+  // Setup Headers
+  const outputData = [
+    ["Payroll Number", "Full Name", "Department", "Total Allowance CY", "Taken Up To 27/06/2026"]
+  ];
+
+  // Map the tallied data to rows
+  for (const payroll in userMap) {
+    const u = userMap[payroll];
+    // Optional: Only include people who have actually taken days, or include everyone.
+    // We are including everyone here for complete HR records.
+    outputData.push([payroll, u.name, u.dept, u.totalAllowance, u.takenBeforeCutoff]);
+  }
+
+  // Write the data to the sheet
+  outSheet.getRange(1, 1, outputData.length, outputData[0].length).setValues(outputData);
+  
+  // Format the header row to look nice
+  outSheet.getRange(1, 1, 1, 5).setFontWeight("bold").setBackground("#073763").setFontColor("white");
+  outSheet.autoResizeColumns(1, 5);
+
+  SpreadsheetApp.getUi().alert("Success! The report has been generated in the 'HR_Half_Year_Report' tab.");
+}
+
+// =======================================================================================
+// TEST: HALF-DAY LAUNCH EMAIL
+// Hardcoded to send ONLY to Benn Clark for testing purposes.
+// =======================================================================================
+function testHalfDayLaunchEmail() {
+  // Hardcoded test user data - impossible to accidentally send to the team
+  const testUser = {
+    name: "Benn",
+    email: "benn.clark2@wickes.co.uk"
+  };
+  
+  try {
+    EmailService.sendHalfDayLaunchEmail(testUser);
+    SpreadsheetApp.getUi().alert("Test email sent successfully to " + testUser.email);
+  } catch (e) {
+    // Fallback if ran from the script editor instead of the UI
+    console.error("Error sending email: " + e.message);
+  }
+}
+
+// =======================================================================================
+// NUCLEAR CLEANUP: PURGE ORPHANED DATA
+// =======================================================================================
+function adminCleanupOrphanedData() {
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.alert('Confirm Nuclear Cleanup', 
+      'This will scan the Requests and Approved tabs and permanently move ANY holiday data belonging to users no longer in the "Users" tab into the "Leaver_Archive" tab.\n\nProceed?', 
+      ui.ButtonSet.YES_NO);
+      
+    if (response !== ui.Button.YES) return;
+
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) {
+        ui.alert('System busy. Try again.');
+        return;
+    }
+
+    try {
+        const ss = SpreadsheetApp.getActiveSpreadsheet(); 
+        const usersSheet = ss.getSheetByName('Users');
+        const reqSheet = ss.getSheetByName('Requests');
+        const appSheet = ss.getSheetByName('Approved');
+        
+        let archiveSheet = ss.getSheetByName("Leaver_Archive");
+        if (!archiveSheet) {
+            archiveSheet = ss.insertSheet("Leaver_Archive");
+            archiveSheet.appendRow(["Archive_Date", "Payroll", "Name", "Source_Tab", "Original_Row_Data (JSON)"]);
+            archiveSheet.getRange(1, 1, 1, 5).setFontWeight("bold").setBackground("#ffcdd2");
+            archiveSheet.setFrozenRows(1);
+        }
+
+        const usersData = usersSheet.getDataRange().getValues();
+        // Build a Set of ACTIVE payrolls
+        const activePayrolls = new Set();
+        for (let i = 1; i < usersData.length; i++) {
+            activePayrolls.add(String(usersData[i][0]).trim());
+        }
+
+        const archiveDate = new Date();
+        const archiveRows = [];
+        let orphanedReqCount = 0;
+        let orphanedAppCount = 0;
+
+        // 1. Process Requests
+        const reqData = reqSheet.getDataRange().getValues();
+        for (let i = reqData.length - 1; i > 0; i--) {
+            const pay = String(reqData[i][1]).trim();
+            if (pay && !activePayrolls.has(pay)) {
+                const name = reqData[i][2] || "Unknown";
+                archiveRows.push([archiveDate, pay, name, "Requests", JSON.stringify(reqData[i])]);
+                reqSheet.deleteRow(i + 1);
+                orphanedReqCount++;
+            }
+        }
+
+        // 2. Process Approved
+        const appData = appSheet.getDataRange().getValues();
+        for (let i = appData.length - 1; i > 0; i--) {
+            const pay = String(appData[i][1]).trim();
+            if (pay && !activePayrolls.has(pay)) {
+                const name = appData[i][2] || "Unknown";
+                archiveRows.push([archiveDate, pay, name, "Approved", JSON.stringify(appData[i])]);
+                appSheet.deleteRow(i + 1);
+                orphanedAppCount++;
+            }
+        }
+
+        // 3. Write to Archive
+        if (archiveRows.length > 0) {
+            archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, archiveRows.length, 5).setValues(archiveRows);
+        }
+
+        ui.alert('Cleanup Complete!', `Removed and archived:\n\n- ${orphanedReqCount} orphaned Requests\n- ${orphanedAppCount} orphaned Approved entries.`, ui.ButtonSet.OK);
+
+    } catch (e) {
+        ui.alert("Error: " + e.message);
+    } finally {
+        lock.releaseLock();
+    }
+}
+
+function extractManagerShortBreaks() {
+  // Use the master spreadsheet ID from your configuration
+  const SPREADSHEET_ID = '1wLTDovDcceXdVEK4H0R-2L4OkrAgW8f61pKYYWIPCA4';
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  
+  // Connect to the Approved tab
+  const appSheet = ss.getSheetByName("Approved");
+  if (!appSheet) {
+    console.error("Could not find the 'Approved' tab.");
+    return;
+  }
+  
+  const data = appSheet.getDataRange().getValues();
+  const headers = data[0]; // Grab the header row
+  const reportData = [headers]; // Initialize array with headers
+  
+  // Loop through all rows (skipping the header)
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    
+    // Column O is index 14 ('Approved By')
+    const approvedBy = String(row[14] || "").trim();
+    
+    // Filter 1: Exclude system tags and blanks
+    const excludedTags = ['Auto-Process', 'Migration Data', 'Reconciliation Fix', ''];
+    if (!excludedTags.includes(approvedBy)) {
+      
+      // Filter 2: Calculate the exact sum from Columns F-L (Indices 5 through 11)
+      let calculatedDays = 0;
+      for (let dIdx = 5; dIdx <= 11; dIdx++) {
+        const cellValue = String(row[dIdx]).trim().toUpperCase();
+        if (cellValue === 'H') calculatedDays += 1;
+        if (['HD', 'HD1', 'HD2'].includes(cellValue)) calculatedDays += 0.5;
+      }
+      
+      // Filter 3: Must be a short break (more than 0, but 2 or fewer days)
+      if (calculatedDays > 0 && calculatedDays <= 2) {
+        reportData.push(row);
+      }
+    }
+  }
+  
+  // --- Output the Results ---
+  const reportSheetName = "Manager_Short_Breaks_Report";
+  let reportSheet = ss.getSheetByName(reportSheetName);
+  
+  // Clear the old report if it exists, or create a new tab
+  if (reportSheet) {
+    reportSheet.clear();
+  } else {
+    reportSheet = ss.insertSheet(reportSheetName);
+  }
+  
+  // Write the data to the report tab
+  if (reportData.length > 1) {
+    reportSheet.getRange(1, 1, reportData.length, reportData[0].length).setValues(reportData);
+    
+    // Format the header
+    reportSheet.getRange(1, 1, 1, reportData[0].length).setFontWeight("bold").setBackground("#e3f2fd");
+    reportSheet.setFrozenRows(1);
+    
+    console.log(`Report successfully generated with ${reportData.length - 1} records.`);
+  } else {
+    reportSheet.getRange(1, 1).setValue("No manager-booked short breaks found.");
+    console.log("No records matched the criteria.");
+  }
+}
